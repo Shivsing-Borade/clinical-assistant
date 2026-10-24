@@ -1,0 +1,16 @@
+ python scripts/ask_clinical.py --query "What is the recommended dosage for dengue management in adults?" --mode hybrid
+
+============================================================
+ CLINICAL ANSWER 
+============================================================
+
+For fever over 100°F, paracetamol is recommended at 10 mg/kg/dose, administered no more frequently than every six hours, up to a maximum adult dose of 4 gm/day. Aspirin and NSAIDs should be avoided.
+
+Status: supported | Clinician Review Required: NO
+
+--- Verified Citations ---
+- dengue_2023.pdf (Page None, Section: Both the patients and their family members should be instructed regarding the following at the outpatient department 1. Educate about warning signs and to report if they appear - Severe abdominal pain and persistent vomiting - Red spots patches on skin - Bleeding from nose and gums - Vomiting blood - Black tarry stools - Drowsiness or irritability - Pale, cold or clammy skin - Difficulty in Breathing 2. Advice to consume adequate oral fluids (ORS/Coconut juice), avoid carbonated drinks 3. Patient need to take adequate bed rest.)
+
+============================================================
+Latency: Retrieval: 1270.65ms | Generation: 105008.13ms | Total: 106278.78ms
+============================================================

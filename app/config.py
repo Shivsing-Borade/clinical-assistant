@@ -15,8 +15,10 @@ class Settings(BaseSettings):
     EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "google")
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "gemini-embedding-2")
     EMBEDDING_OUTPUT_DIMENSION: int = int(os.getenv("EMBEDDING_OUTPUT_DIMENSION", "768"))
-    GEMINI_GENERATION_MODEL: str = os.getenv("GEMINI_GENERATION_MODEL", "gemini-3.8-flash")
+    GEMINI_GENERATION_MODEL: str = os.getenv("GEMINI_GENERATION_MODEL", "gemini-3.5-flash-lite")
     GENERATION_TEMPERATURE: float = float(os.getenv("GENERATION_TEMPERATURE", "0.0"))
+    GENERATION_MAX_TOKENS: int = int(os.getenv("GENERATION_MAX_TOKENS", "256"))
+    GENERATION_TOP_K_CONTEXT: int = int(os.getenv("GENERATION_TOP_K_CONTEXT", "4"))
 
     # Vector DB (Qdrant)
     QDRANT_URL: str = os.getenv("QDRANT_URL", "http://localhost:6333")

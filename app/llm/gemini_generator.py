@@ -49,6 +49,7 @@ class GeminiGenerator:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=self.temperature,
+                    max_output_tokens=settings.GENERATION_MAX_TOKENS,
                     response_mime_type="application/json",
                     response_schema=ClinicalAnswer,
                 ),

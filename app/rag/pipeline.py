@@ -40,6 +40,12 @@ class ClinicalRAGPipeline:
         # 1. Retrieval
         start_retrieval = time.perf_counter()
         results = self.retriever.retrieve(query)
+
+        # Optimization: Limit context to top K highest-ranked unique chunks for generation
+        # We keep the original 'results' for citation metadata resolution in the CLI,
+        # but we only send a subset to the LLM.
+        gen_context = results[:settings.GENERATION_TOP_K_CONTEXT]
+
         retrieval_latency = (time.perf_counter() - start_retrieval) * 1000
 
         # 2. Short-circuit if no evidence
@@ -58,7 +64,8 @@ class ClinicalRAGPipeline:
         # 3. Generation
         start_gen = time.perf_counter()
         try:
-            answer_obj = self.generator.generate_answer(query, results)
+            # Pass only the optimized gen_context
+            answer_obj = self.generator.generate_answer(query, gen_context)
         except Exception as e:
             logger.error(f"Generation failed: {e}")
             raise
