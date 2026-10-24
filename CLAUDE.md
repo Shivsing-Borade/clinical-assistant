@@ -1,0 +1,89 @@
+# Clinical Knowledge Assistant — Project Instructions
+
+> **Project status:** Hackathon prototype, phases 1–2 only. Clinical-reference RAG system.
+> **Primary objective:** Build a reliable retrieval pipeline over clinician-reviewed Indian OPD guidelines.
+> **Constraint:** Not an autonomous diagnostic/prescribing system. Output for clinician review only.
+
+## 1. Role and Working Rules
+Act as a senior Python/RAG engineer.
+- **Incremental Work:** Work in small, verifiable steps.
+- **Decisions:** Explain 2–3 options for material architecture changes and ask user to choose.
+- **Dependencies:** No silent installation of heavy libraries.
+- **Security:** No secrets, PHI, or real patient data in code, logs, or sent to APIs. Use synthetic fixtures.
+- **Clinical Safety:** Every clinical statement must be grounded in retrieved sources. Do not invent medical facts.
+- **Environment:** Use Windows PowerShell by default. Keep code typed, modular, and documented.
+
+## 2. Product Scope and Phases
+
+### Phase 1 — Document Data and RAG Pipeline (CURRENT)
+**Deliverables:**
+1. **Inventory:** Source register, provenance, and PDF diagnostics (page count, extractable-text ratio, scan detection).
+2. **Parsing:** Docling + RapidOCR → structured intermediate representation (Markdown/JSON) preserving reading order, tables, and page numbers.
+3. **Quality:** Review queue for poor parses; no silent treatment of OCR failures.
+4. **Cleaning:** Remove noise while preserving clinical meaning (units, negation, dosage).
+5. **Chunking:** Primary: Hybrid structure-aware + table-aware + parent/child. Baseline: Recursive text splitting.
+6. **Indexing:** Gemini Embedding 2 (768 dims) → self-hosted Qdrant.
+7. **Retrieval:** Hybrid (Dense + BM25) fused with RRF. Baseline: Dense-only.
+8. **Interface:** CLI for ingestion, index inspection, and cited search.
+9. **Evaluation:** Custom deterministic retrieval metrics (Recall@k, MRR, nDCG) + pytest. No LLM-as-judge in Phase 1.
+
+### Phase 2 — RAG Evaluation and Answer Safety (FUTURE)
+**Deliverables:**
+1. **Gold Set:** 40–60 synthetic/clinician-reviewed questions with expected source/page IDs.
+2. **LLM Integration:** `gemini-3.8-flash` via provider adapter.
+3. **Grounded Prompting:** Prohibit unsupported claims; require source-linked citations; abstain if evidence is missing.
+4. **Output Contract:** Schema-constrained structured JSON (Pydantic) with status, answer, evidence citations, and clinician-review flag.
+5. **Validation:** Deterministic checks: verify cited chunk IDs exist and match retrieved metadata.
+6. **Evaluation:** Correctness against gold answers, abstention behavior, and hallucination challenges.
+7. **Error Analysis:** Report on failures and recommended fixes.
+
+## 3. Architecture & Design Principles
+- **Source of Truth:** Original PDF. Store unchanged; maintain source manifest.
+- **Provenance:** Every chunk must have `source_id`, filename, version, page, and heading path.
+- **Table Handling:** Preserve captions, headers, units, and footnotes. Repeat headers in split tables.
+- **Retrieval:** Use hybrid search (dense + lexical) for medical terms/acronyms. Return parent context for child matches.
+- **Fail-Safe:** Return "Evidence not found" rather than model-hallucinated answers.
+
+## 4. Repository Layout
+```text
+clinical-assistant/
+├── configs/               # ingestion.yaml, retrieval.yaml, evaluation.yaml
+├── data/                  # raw/ (PDFs), interim/ (parsed), curated/, eval/
+├── manifests/             # sources.yaml
+├── app/
+│   ├── config.py
+│   ├── schemas/            # documents.py, chunks.py, evaluation.py
+│   ├── ingestion/          # inventory, parse_pdf, normalize, quality, chunking/
+│   ├── embeddings/         # base.py, gemini_embedding_2.py
+│   ├── retrieval/          # index, hybrid, rerank
+│   ├── llm/                # base.py, providers/gemini.py
+│   ├── rag/                # answer, prompts, citation_validation
+│   └── cli.py
+├── prompts/                # versioned prompt files
+├── evals/                  # dataset.jsonl, run_retrieval.py, run_answers.py
+└── tests/                  # unit/, integration/, fixtures/
+```
+
+## 5. Approved Technology Stack
+- **PDF/OCR:** Docling + RapidOCR.
+- **Embeddings:** `gemini-embedding-2` (initial: 768 dimensions).
+- **Vector DB:** Qdrant (self-hosted Docker).
+- **Retrieval:** Dense + BM25 + RRF. Reranking disabled initially.
+- **Answer LLM:** `gemini-3.8-flash` (Phase 2).
+- **Validation:** Pydantic + custom deterministic citation checks.
+- **Evaluation:** pytest + custom metrics.
+
+## 6. Environment Variables
+- `LLM_PROVIDER`, `GEMINI_API_KEY`, `GEMINI_MODEL`
+- `QDRANT_URL`, `QDRANT_COLLECTION`
+- `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_OUTPUT_DIMENSION` (768)
+- `CHUNK_STRATEGY`, `RETRIEVAL_TOP_K`, `RERANKER_ENABLED` (false)
+
+## 7. Operating Protocol
+1. **Inspect:** Read `CLAUDE.md` and environment.
+2. **Implement:** Small, verifiable increments per Phase step.
+3. **Test:** Run tests and report exact commands/results.
+4. **Review:** Phase exit review before moving to the next phase.
+
+## 8. Reference Links
+See [docs/references.md](docs/references.md)
