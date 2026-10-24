@@ -11,7 +11,10 @@ class QdrantVectorStore:
     """Integration with Qdrant Vector Database for child chunk storage."""
 
     def __init__(self):
-        self.client = QdrantClient(url=settings.QDRANT_URL)
+        self.client = QdrantClient(
+            url=settings.QDRANT_URL,
+            api_key=settings.QDRANT_API_KEY
+        )
         self.collection_name = settings.QDRANT_COLLECTION
 
     def ensure_collection(self):

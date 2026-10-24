@@ -1,8 +1,12 @@
 import os
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 from typing import Optional
 
 class Settings(BaseSettings):
+    # Pydantic V2 ConfigDict to allow extra env vars without crashing
+    model_config = ConfigDict(extra='ignore', env_file=".env")
+
     # General
     PROJECT_NAME: str = "Clinical Knowledge Assistant"
 
@@ -14,6 +18,7 @@ class Settings(BaseSettings):
 
     # Vector DB (Qdrant)
     QDRANT_URL: str = os.getenv("QDRANT_URL", "http://localhost:6333")
+    QDRANT_API_KEY: Optional[str] = os.getenv("QDRANT_API_KEY")
     QDRANT_COLLECTION: str = os.getenv("QDRANT_COLLECTION", "clinical_guidelines")
 
     # Retrieval
@@ -25,8 +30,5 @@ class Settings(BaseSettings):
     DATA_INTERIM_DIR: str = "data/interim"
     DATA_PROCESSED_DIR: str = "data/processed"
     MANIFESTS_DIR: str = "manifests"
-
-    class Config:
-        env_file = ".env"
 
 settings = Settings()

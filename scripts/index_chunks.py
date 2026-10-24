@@ -4,7 +4,7 @@ import argparse
 from typing import List
 from app.config import settings
 from app.schemas.chunks import Chunk
-from app.embeddings.gemini_embedding_2 import GeminiEmbeddingModel
+from app.embeddings.gemini_embedding_2 import GeminiEmbeddingProvider
 from app.retrieval.vector_store import QdrantVectorStore
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -57,7 +57,7 @@ def run_indexing(dry_run: bool = True):
     # Real indexing flow
     try:
         # Initialize components
-        embedder = GeminiEmbeddingModel()
+        embedder = GeminiEmbeddingProvider()
         vector_store = QdrantVectorStore()
 
         # Ensure collection is ready
@@ -66,22 +66,44 @@ def run_indexing(dry_run: bool = True):
         # Process in batches to avoid API limits/memory issues
         batch_size = 50
         total_upserted = 0
+        skipped = 0
         failures = 0
 
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i : i + batch_size]
-            texts = [c.content for c in batch]
+
+            # Separate valid texts and their corresponding chunks
+            valid_pairs = []
+            for chunk in batch:
+                if not chunk.content or not chunk.content.strip():
+                    skipped += 1
+                    continue
+                valid_pairs.append(chunk)
+
+            if not valid_pairs:
+                continue
+
+            texts = [c.content for c in valid_pairs]
 
             try:
-                logger.info(f"Embedding batch {i//batch_size + 1} ({i} to {min(i+batch_size, len(chunks))})...")
+                logger.info(f"Embedding batch {i//batch_size + 1} ({i} to {min(i+batch_size, len(chunks))}) - Processing {len(valid_pairs)} valid chunks...")
                 vectors = embedder.embed_texts(texts)
-                vector_store.upsert_chunks(batch, vectors)
-                total_upserted += len(batch)
+                vector_store.upsert_chunks(valid_pairs, vectors)
+                total_upserted += len(valid_pairs)
             except Exception as e:
                 logger.error(f"Failed to process batch starting at {i}: {e}")
-                failures += len(batch)
+                failures += len(valid_pairs)
 
-        logger.info(f"Indexing complete. Total upserted: {total_upserted}, Total failures: {failures}")
+        logger.info("--- INDEXING REPORT ---")
+        logger.info(f"Total child chunks processed: {len(chunks)}")
+        logger.info(f"Successfully indexed:       {total_upserted}")
+        logger.info(f"Skipped (empty/whitespace):   {skipped}")
+        logger.info(f"Failures:                   {failures}")
+
+        if failures > 0:
+            logger.error("Indexing completed with failures. Please check logs.")
+        else:
+            logger.info("Indexing completed successfully.")
 
     except Exception as e:
         logger.error(f"Critical error during indexing: {e}")
