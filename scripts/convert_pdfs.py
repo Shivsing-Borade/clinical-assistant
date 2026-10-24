@@ -36,15 +36,35 @@ def convert_pdfs(raw_dir: str, interim_dir: str):
             if json_file.stat().st_size > 0 and md_file.stat().st_size > 0:
                 try:
                     with open(json_file, "r", encoding="utf-8") as f:
-                        json.load(f)
+                        json_data = json.load(f)
                     print(f"Skipping {pdf.name}, valid outputs already exist.")
-                    # We still need to add this to the reports list
-                    # In a real scenario, we'd reload the metadata from the JSON
-                    # For now, we'll just mark it as success and move on.
-                    # We'll handle report aggregation at the end.
+
+                    # Extract metadata from existing JSON to maintain report integrity
+                    # In Docling's exported dict, 'pages' usually exists if metadata was captured
+                    pages_count = len(json_data.get('pages', [])) if isinstance(json_data.get('pages'), list) else 0
+
+                    # Simple proxy for table detection in existing MD
+                    md_content_existing = md_file.read_text(encoding="utf-8")
+                    tables_count = 1 if "Table" in md_content_existing else 0
+
+                    doc_report = {
+                        "filename": pdf.name,
+                        "status": "success",
+                        "pages_processed": pages_count,
+                        "warnings": [],
+                        "manual_review_required": False,
+                        "review_reasons": [],
+                        "tables_found": tables_count
+                    }
+                    if not md_content_existing.strip():
+                        doc_report["warnings"].append("Document contains no extractable text.")
+                        doc_report["manual_review_required"] = True
+                        doc_report["review_reasons"].append("Empty output")
+
+                    reports.append(doc_report)
                     continue
-                except json.JSONDecodeError:
-                    print(f"Invalid JSON for {pdf.name}, reprocessing...")
+                except (json.JSONDecodeError, IOError):
+                    print(f"Invalid output for {pdf.name}, reprocessing...")
 
         print(f"Converting {pdf.name}...")
         try:

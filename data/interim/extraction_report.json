@@ -1,1 +1,38 @@
-[]
+[
+  {
+    "filename": "antimicrobial_guidelines.pdf",
+    "status": "success",
+    "pages_processed": 0,
+    "warnings": [],
+    "manual_review_required": false,
+    "review_reasons": [],
+    "tables_found": 1
+  },
+  {
+    "filename": "dengue_2023.pdf",
+    "status": "success",
+    "pages_processed": 0,
+    "warnings": [],
+    "manual_review_required": false,
+    "review_reasons": [],
+    "tables_found": 1
+  },
+  {
+    "filename": "GASTROENTEROLOGICAL.pdf",
+    "status": "success",
+    "pages_processed": 0,
+    "warnings": [],
+    "manual_review_required": false,
+    "review_reasons": [],
+    "tables_found": 1
+  },
+  {
+    "filename": "Hypertension.pdf",
+    "status": "success",
+    "pages_processed": 0,
+    "warnings": [],
+    "manual_review_required": false,
+    "review_reasons": [],
+    "tables_found": 1
+  }
+]

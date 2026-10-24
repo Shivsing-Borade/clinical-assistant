@@ -1,0 +1,34 @@
+[
+  {
+    "source_id": "antimicrobial_guidelines",
+    "parent_count": 82,
+    "child_count": 102,
+    "table_count": 10,
+    "page_coverage": 1.0,
+    "warnings": []
+  },
+  {
+    "source_id": "dengue_2023",
+    "parent_count": 176,
+    "child_count": 190,
+    "table_count": 6,
+    "page_coverage": 1.0,
+    "warnings": []
+  },
+  {
+    "source_id": "gastroenterological",
+    "parent_count": 195,
+    "child_count": 201,
+    "table_count": 14,
+    "page_coverage": 1.0,
+    "warnings": []
+  },
+  {
+    "source_id": "hypertension",
+    "parent_count": 189,
+    "child_count": 252,
+    "table_count": 19,
+    "page_coverage": 1.0,
+    "warnings": []
+  }
+]
