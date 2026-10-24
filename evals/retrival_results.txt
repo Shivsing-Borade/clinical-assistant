@@ -1,0 +1,12 @@
+--- Retrieval Evaluation Results ---
+Gold Set Size: 12
+
+Dense Retrieval (Average):
+  recall_5: 0.9583
+  recall_10: 1.0000
+  mrr_10: 0.7667
+
+Hybrid Retrieval (Average):
+  recall_5: 0.9167
+  recall_10: 1.0000
+  mrr_10: 0.7870

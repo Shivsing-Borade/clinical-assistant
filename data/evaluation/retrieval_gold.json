@@ -1,0 +1,74 @@
+[
+  {
+    "question": "What are the classes of in vitro diagnostic (IVD) medical devices based on risk level according to CDSCO?",
+    "relevant_chunks": ["c_antimicrobial_guidelines_15_1", "ct_antimicrobial_guidelines_2_0"],
+    "source": "antimicrobial_guidelines.pdf",
+    "justification": "Directly lists Class A (lowest) to Class D (highest) risk levels and examples in Table 1."
+  },
+  {
+    "question": "What is the minimum number of sites required for validation studies if multiple sites are not feasible?",
+    "relevant_chunks": ["c_antimicrobial_guidelines_16_0"],
+    "source": "antimicrobial_guidelines.pdf",
+    "justification": "States validation should be carried out in a minimum of two different sites."
+  },
+  {
+    "question": "How is the Minimum Inhibitory Concentration (MIC) defined in antimicrobial susceptibility testing?",
+    "relevant_chunks": ["c_antimicrobial_guidelines_17_0"],
+    "source": "antimicrobial_guidelines.pdf",
+    "justification": "Provides the specific definition of MIC as the lowest concentration preventing visible growth."
+  },
+  {
+    "question": "Which form is used to obtain a Test License for domestic manufacture of a new IVD in India?",
+    "relevant_chunks": ["c_antimicrobial_guidelines_15_0"],
+    "source": "antimicrobial_guidelines.pdf",
+    "justification": "Explicitly mentions form MD-13 for obtaining a Test License."
+  },
+  {
+    "question": "What are the high-risk factors for severe dengue disease in children and elderly?",
+    "relevant_chunks": ["c_dengue_2023_55_0"],
+    "source": "dengue_2023.pdf",
+    "justification": "Lists infants/children <10 years with malnutrition and elderly >65 years as high-risk."
+  },
+  {
+    "question": "In which phase of dengue does the patient develop a convalescent rash?",
+    "relevant_chunks": ["c_dengue_2023_48_0"],
+    "source": "dengue_2023.pdf",
+    "justification": "Describes the convalescent rash occurring in the recovery phase."
+  },
+  {
+    "question": "When is platelet transfusion considered for adults with underlying hypertension in dengue patients?",
+    "relevant_chunks": ["c_dengue_2023_104_1"],
+    "source": "dengue_2023.pdf",
+    "justification": "States it may be considered when thrombocytopenia is less than 10,000 cell/mm3."
+  },
+  {
+    "question": "What are the key components of the clinical assessment of a dengue patient's history?",
+    "relevant_chunks": ["c_dengue_2023_48_0", "ct_dengue_2023_3_0"],
+    "source": "dengue_2023.pdf",
+    "justification": "Table 3 lists history items like date of onset, fluid intake, and warning symptoms."
+  },
+  {
+    "question": "What are the main topics covered in the gastroenterological disease management guidelines?",
+    "relevant_chunks": ["c_gastroenterological_2_0"],
+    "source": "GASTROENTEROLOGICAL.pdf",
+    "justification": "The contents table lists Dysphagia, Achalasia Cardia, Acute Liver Failure, etc."
+  },
+  {
+    "question": "What is the risk level for 'AMR Direct Flow Chip Kit' in CDSCO IVD classification?",
+    "relevant_chunks": ["c_antimicrobial_guidelines_15_1", "ct_antimicrobial_guidelines_2_0"],
+    "source": "antimicrobial_guidelines.pdf",
+    "justification": "Table 1 lists this kit under Class C (Moderate High Risk)."
+  },
+  {
+    "question": "What does the abbreviation 'CRS' stand for in the context of antimicrobial validation?",
+    "relevant_chunks": ["c_antimicrobial_guidelines_11_0"],
+    "source": "antimicrobial_guidelines.pdf",
+    "justification": "Abbreviations table explicitly defines CRS as Composite Reference Standard."
+  },
+  {
+    "question": "What is the standard ISO for clinical performance studies of in vitro diagnostic medical devices?",
+    "relevant_chunks": ["c_antimicrobial_guidelines_15_0"],
+    "source": "antimicrobial_guidelines.pdf",
+    "justification": "Specifies ISO 20916:2019 for clinical performance studies."
+  }
+]
