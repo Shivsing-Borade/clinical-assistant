@@ -1,5 +1,6 @@
 import logging
 import time
+import json
 from typing import List, Dict, Any, Tuple, Optional
 from pydantic import BaseModel, Field
 
@@ -11,6 +12,7 @@ from app.retrieval.vector_store import QdrantVectorStore
 from app.llm.gemini_generator import GeminiGenerator
 from app.llm.router import IntentRouter, RoutingResponse
 from app.schemas.generation import ClinicalAnswer
+from app.rag.context_manager import bound_context, bound_evidence
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,7 @@ class OrchestratedResponse(BaseModel):
     clinician_review_required: bool = False
     caution: Optional[str] = None
     metrics: Dict[str, float] = Field(default_factory=dict)
+    context_diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 class ClinicalRAGPipeline:
     """Orchestrates the retrieval-to-generation pipeline for clinical answers."""
@@ -44,18 +47,21 @@ class ClinicalRAGPipeline:
         else:
             self.retriever = DenseRetriever(embedding_provider, vector_store)
 
-    def ask(self, query: str) -> Tuple[ClinicalAnswer, List[Dict[str, Any]], Dict[str, float]]:
+    def ask(self, query: str, history: List[Dict[str, Any]] = None, standalone_query: Optional[str] = None) -> Tuple[ClinicalAnswer, List[Dict[str, Any]], Dict[str, float], Dict[str, Any]]:
         """
         Executes the full RAG pipeline: Retrieve -> Generate -> Validate.
         """
         start_total = time.perf_counter()
 
+        # Use standalone query for retrieval if provided (for follow-ups)
+        retrieval_query = standalone_query if standalone_query else query
+
         # 1. Retrieval
         start_retrieval = time.perf_counter()
-        results = self.retriever.retrieve(query)
+        results = self.retriever.retrieve(retrieval_query)
 
-        # Optimization: Limit context to top K highest-ranked unique chunks for generation
-        gen_context = results[:settings.GENERATION_TOP_K_CONTEXT]
+        # Bounded Evidence selection based on token budget
+        gen_context = bound_evidence(results)
 
         retrieval_latency = (time.perf_counter() - start_retrieval) * 1000
 
@@ -69,12 +75,13 @@ class ClinicalRAGPipeline:
                 clinician_review_required=False,
                 caution="No relevant evidence found in the indexed documents."
             )
-            return ans, [], {"retrieval_ms": retrieval_latency, "generation_ms": 0.0, "total_ms": latency_total}
+            return ans, [], {"retrieval_ms": retrieval_latency, "generation_ms": 0.0, "total_ms": latency_total}, {}
 
-        # 3. Generation
+        # 3. Generation with Bounded History
         start_gen = time.perf_counter()
         try:
-            answer_obj = self.generator.generate_answer(query, gen_context)
+            # We pass history separately; the generator handles its prompt construction
+            answer_obj = self.generator.generate_answer(query, gen_context, history=history)
         except Exception as e:
             logger.error(f"Generation failed: {e}")
             raise
@@ -98,7 +105,13 @@ class ClinicalRAGPipeline:
             "total_ms": latency_total
         }
 
-        return answer_obj, results, metrics
+        # Basic diagnostics for the bounded context
+        diagnostics = {
+            "retrieved_chunks": len(results),
+            "used_chunks": len(gen_context),
+        }
+
+        return answer_obj, results, metrics, diagnostics
 
 class ClinicalAssistantOrchestrator:
     """Handles intent routing and dispatches to RAG or immediate response."""
@@ -107,15 +120,18 @@ class ClinicalAssistantOrchestrator:
         self.router = IntentRouter()
         self.rag_pipeline = ClinicalRAGPipeline(retriever_mode=retriever_mode)
 
-    def process_query(self, query: str) -> Tuple[OrchestratedResponse, List[Dict[str, Any]]]:
+    def process_query(self, query: str, history: List[Dict[str, Any]] = None) -> Tuple[OrchestratedResponse, List[Dict[str, Any]]]:
         """
         Routes the query and returns a consistent OrchestratedResponse.
         """
         start_total = time.perf_counter()
 
+        # Bounded history for routing and generation
+        bounded_history = bound_context(history) if history else []
+
         # 1. Routing
         start_routing = time.perf_counter()
-        routing_res = self.router.route_query(query)
+        routing_res = self.router.route_query(query, history=bounded_history)
         routing_latency = (time.perf_counter() - start_routing) * 1000
 
         route = routing_res.route
@@ -124,7 +140,12 @@ class ClinicalAssistantOrchestrator:
         if route == "clinical_rag":
             # Full RAG Pipeline
             try:
-                answer_obj, results, rag_metrics = self.rag_pipeline.ask(query)
+                # Pass history and optional standalone query for retrieval
+                answer_obj, results, rag_metrics, diagnostics = self.rag_pipeline.ask(
+                    query,
+                    history=bounded_history,
+                    standalone_query=routing_res.standalone_question
+                )
 
                 total_latency = (time.perf_counter() - start_total) * 1000
 
@@ -142,7 +163,11 @@ class ClinicalAssistantOrchestrator:
                     cited_chunk_ids=answer_obj.cited_chunk_ids,
                     clinician_review_required=answer_obj.clinician_review_required,
                     caution=answer_obj.caution,
-                    metrics=metrics
+                    metrics=metrics,
+                    context_diagnostics={
+                        "history_turns": len(bounded_history) // 2,
+                        **diagnostics
+                    }
                 )
                 return resp, results
 
@@ -163,6 +188,7 @@ class ClinicalAssistantOrchestrator:
             resp = OrchestratedResponse(
                 route=route,
                 answer=routing_res.response or "I'm sorry, I couldn't generate a response for this request.",
-                metrics=metrics
+                metrics=metrics,
+                context_diagnostics={"history_turns": len(bounded_history) // 2}
             )
             return resp, []

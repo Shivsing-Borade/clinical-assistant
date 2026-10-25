@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     RETRIEVAL_TOP_K: int = int(os.getenv("RETRIEVAL_TOP_K", "5"))
     RERANKER_ENABLED: bool = os.getenv("RERANKER_ENABLED", "false").lower() == "true"
 
+    # Conversation Context
+    CHAT_HISTORY_MAX_TURNS: int = int(os.getenv("CHAT_HISTORY_MAX_TURNS", "6"))
+    CHAT_HISTORY_MAX_TOKENS: int = int(os.getenv("CHAT_HISTORY_MAX_TOKENS", "1500"))
+    GENERATION_EVIDENCE_MAX_TOKENS: int = int(os.getenv("GENERATION_EVIDENCE_MAX_TOKENS", "3000"))
+
     # Data Paths
     DATA_RAW_DIR: str = "data/raw"
     DATA_INTERIM_DIR: str = "data/interim"

@@ -17,6 +17,10 @@ class RoutingResponse(BaseModel):
         None,
         description="The final answer for non-clinical routes. Leave null for 'clinical_rag'."
     )
+    standalone_question: Optional[str] = Field(
+        None,
+        description="For 'clinical_rag', a rewritten version of the query that is standalone and contains all necessary context from history for retrieval."
+    )
 
 class IntentRouter:
     """Classifies user intent and provides immediate responses for non-RAG routes."""
@@ -29,7 +33,7 @@ class IntentRouter:
         self.client = genai.Client(api_key=api_key)
         self.model_id = settings.GEMINI_GENERATION_MODEL
 
-    def route_query(self, query: str) -> RoutingResponse:
+    def route_query(self, query: str, history: List[Dict[str, Any]] = None) -> RoutingResponse:
         """
         Routes the query to the appropriate handler.
         Returns a RoutingResponse containing the route and an optional immediate answer.
@@ -50,17 +54,24 @@ class IntentRouter:
             "- When uncertain whether a question needs clinical evidence, prefer 'clinical_rag'.\n"
             "- For 'greeting', 'general_chat', and 'patient_data', provide a concise, natural response in the 'response' field.\n"
             "- For 'patient_data', explain briefly that patient-record access is not connected yet.\n"
-            "- For 'clinical_rag', leave the 'response' field null. The system will handle the RAG pipeline.\n"
+            "- For 'clinical_rag', leave the 'response' field null. "
+            "Crucially, if the user's query is a follow-up (e.g., 'what about children?'), "
+            "use the provided conversation history to rewrite it as a standalone retrieval question in the 'standalone_question' field.\n"
             "- DO NOT fabricate patient information or guideline claims."
         )
+
+        # Construct context from history
+        history_text = ""
+        if history:
+            history_text = "\n".join([f"{m['role']}: {m['text']}" for m in history])
 
         try:
             response = self.client.models.generate_content(
                 model=self.model_id,
-                contents=f"{system_instructions}\n\nUSER QUERY: {query}",
+                contents=f"{system_instructions}\n\nRECENT HISTORY:\n{history_text}\n\nUSER QUERY: {query}",
                 config=types.GenerateContentConfig(
                     temperature=0.0,
-                    max_output_tokens=150,
+                    max_output_tokens=250,
                     response_mime_type="application/json",
                     response_schema=RoutingResponse,
                 ),

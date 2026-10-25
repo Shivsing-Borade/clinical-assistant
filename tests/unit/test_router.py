@@ -101,7 +101,8 @@ def test_orchestrator_routing_logic(mock_rag_class, mock_router_class):
     mock_rag.ask.return_value = (
         MagicMock(answer="Dose is 500mg", evidence_status="supported", cited_chunk_ids=["c1"], clinician_review_required=False, caution=None),
         [{"chunk_id": "c1"}],
-        {"retrieval_ms": 10.0, "generation_ms": 20.0, "total_ms": 30.0}
+        {"retrieval_ms": 10.0, "generation_ms": 20.0, "total_ms": 30.0},
+        {} # diagnostics
     )
 
     resp, results = orchestrator.process_query("What is the dose?")

@@ -1,17 +1,17 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from app.ui.chat_app import get_orchestrator
 
 def test_orchestrator_caching():
     """
-    Verify that get_orchestrator uses st.cache_resource
-    (via testing the logic of caching if needed, or just ensuring it initializes)
-    Note: Streamlit caching is hard to test in pure pytest without streamlit run,
-    but we can verify the function return type.
+    Verify that get_orchestrator initializes and returns a ClinicalAssistantOrchestrator.
+    Note: Streamlit caching is tested via integration/manual tests as it requires a ScriptRunContext.
     """
-    # We mock the Orchestrator since we can't run Qdrant/Gemini in offline tests
-    with pytest.raises(Exception): # Expect failure because env vars aren't set
-        get_orchestrator("hybrid")
+    with patch('app.rag.pipeline.IntentRouter'), \
+         patch('app.rag.pipeline.ClinicalRAGPipeline'):
+        orchestrator = get_orchestrator("hybrid")
+        from app.rag.pipeline import ClinicalAssistantOrchestrator
+        assert isinstance(orchestrator, ClinicalAssistantOrchestrator)
 
 def test_citation_mapping_logic():
     """

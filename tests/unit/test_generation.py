@@ -28,7 +28,7 @@ def test_empty_retrieval_skips_llm(mock_retriever, mock_generator):
     mock_retriever.retrieve.return_value = []
 
     pipeline = ClinicalRAGPipeline()
-    answer, results, metrics = pipeline.ask("Any question")
+    answer, results, metrics, diagnostics = pipeline.ask("Any question")
 
     # Assertions
     assert answer.evidence_status == "insufficient_evidence"
@@ -52,7 +52,7 @@ def test_grounded_answer_success(mock_retriever, mock_generator):
     mock_generator.generate_answer.return_value = mock_ans
 
     pipeline = ClinicalRAGPipeline()
-    answer, results, metrics = pipeline.ask("Question")
+    answer, results, metrics, diagnostics = pipeline.ask("Question")
 
     assert answer.answer == "The answer is Text 1."
     assert answer.evidence_status == "supported"
@@ -75,7 +75,7 @@ def test_invalid_citation_detection(mock_retriever, mock_generator):
     mock_generator.generate_answer.return_value = mock_ans
 
     pipeline = ClinicalRAGPipeline()
-    answer, results, metrics = pipeline.ask("Question")
+    answer, results, metrics, diagnostics = pipeline.ask("Question")
 
     # Assertions
     assert answer.clinician_review_required is True
@@ -95,7 +95,7 @@ def test_insufficient_evidence_from_llm(mock_retriever, mock_generator):
     mock_generator.generate_answer.return_value = mock_ans
 
     pipeline = ClinicalRAGPipeline()
-    answer, results, metrics = pipeline.ask("Question")
+    answer, results, metrics, diagnostics = pipeline.ask("Question")
 
     assert answer.evidence_status == "insufficient_evidence"
     assert answer.clinician_review_required is False

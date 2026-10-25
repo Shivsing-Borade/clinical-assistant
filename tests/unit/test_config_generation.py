@@ -11,15 +11,12 @@ def mock_genai_client():
         yield mock_instance
 
 def test_default_generation_model():
-    """Verify the default generation model is gemini-3.8-flash."""
-    # We reset the settings for this test or check the default
-    from app.config import Settings
+    """Verify the default generation model is gemini-3.5-flash-lite."""
     # Create a fresh settings object without .env to check default
+    from app.config import Settings
     test_settings = Settings()
-    # Since we can't easily 'unset' env vars in a running process reliably for Pydantic BaseSettings
-    # we check if the logic in config.py matches the requirement.
-    assert test_settings.GEMINI_GENERATION_MODEL == "gemini-3.8-flash" or \
-           "gemini-3.8-flash" in test_settings.GEMINI_GENERATION_MODEL
+    # Use the same model name used in production config.py
+    assert test_settings.GEMINI_GENERATION_MODEL == "gemini-3.5-flash-lite"
 
 def test_env_var_override_generation_model():
     """Verify that GEMINI_GENERATION_MODEL env var overrides the default."""

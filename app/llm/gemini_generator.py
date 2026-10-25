@@ -19,15 +19,20 @@ class GeminiGenerator:
         self.model_id = settings.GEMINI_GENERATION_MODEL
         self.temperature = settings.GENERATION_TEMPERATURE
 
-    def generate_answer(self, query: str, context_chunks: List[Dict[str, Any]]) -> ClinicalAnswer:
+    def generate_answer(self, query: str, context_chunks: List[Dict[str, Any]], history: List[Dict[str, Any]] = None) -> ClinicalAnswer:
         """
-        Generates a grounded clinical answer based on the provided retrieved chunks.
+        Generates a grounded clinical answer based on the provided retrieved chunks and recent history.
         """
         # Format context for the prompt
         context_text = "\n\n".join([
             f"[Chunk ID: {c['chunk_id']}] Content: {c['content']}"
             for c in context_chunks
         ])
+
+        # Format history for the prompt
+        history_text = ""
+        if history:
+            history_text = "\n".join([f"{m['role']}: {m['text']}" for m in history])
 
         prompt = (
             "You are a clinical reference assistant. Answer the user's question ONLY using the provided evidence.\n\n"
@@ -39,6 +44,7 @@ class GeminiGenerator:
             "3. Every clinical claim must be linked to a chunk_id in cited_chunk_ids.\n"
             "4. DO NOT invent doses, thresholds, recommendations, or clinical facts.\n"
             "5. Keep the answer spoken-style, concise (max 40 words).\n\n"
+            f"CONVERSATION HISTORY:\n{history_text}\n\n"
             f"EVIDENCE:\n{context_text}\n\n"
             f"QUESTION:\n{query}\n"
         )
