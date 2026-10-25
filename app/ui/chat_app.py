@@ -15,11 +15,70 @@ st.set_page_config(
 # --- Custom CSS ---
 st.markdown("""
     <style>
-        .stChatMessage { border-radius: 15px; padding: 10px; margin-bottom: 10px; }
-        .main { background-color: #fcfcfc; }
-        .stExpander { background-color: #f0f2f6; border: none; border-radius: 10px; }
-        .stAlert { border-radius: 10px; }
-        div[data-testid="stChatMessageContent"] { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+        .stChatMessage {
+            border-radius: 15px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+
+        .main {
+            background-color: #fcfcfc;
+        }
+
+        .stExpander {
+            background-color: #f0f2f6;
+            border: none;
+            border-radius: 10px;
+        }
+
+        .stAlert {
+            border-radius: 10px;
+        }
+
+        div[data-testid="stChatMessageContent"] {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /*
+           Fix New Chat button
+           Streamlit often wraps buttons in a div. We target the button element
+           within the sidebar that has the primary style.
+        */
+        div[data-testid="stSidebar"] button[kind="primary"],
+        div[data-testid="stSidebar"] button[kind="primary"] div {
+            background-color: #123B6D !important;
+            color: #FFFFFF !important;
+        }
+
+        /* Target the inner button text specifically if needed */
+        div[data-testid="stSidebar"] button[kind="primary"] p {
+            color: #FFFFFF !important;
+        }
+
+        div[data-testid="stSidebar"] button[kind="primary"]:hover {
+            background-color: #0B2A50 !important;
+            color: #FFFFFF !important;
+        }
+
+        /*
+           Fix Diagnosis and View Sources labels
+           We target all text-containing elements within the expander header.
+        */
+        div[data-testid="stExpander"] header,
+        div[data-testid="stExpander"] header p,
+        div[data-testid="stExpander"] header span,
+        div[data-testid="stExpander"] header div {
+            color: #1E293B !important;
+        }
+
+        div[data-testid="stExpander"] header p {
+            font-weight: 600 !important;
+        }
+
+        div[data-testid="stExpander"] header:hover p,
+        div[data-testid="stExpander"] header:hover span {
+            color: #123B6D !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
