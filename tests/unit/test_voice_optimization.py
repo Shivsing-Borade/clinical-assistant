@@ -35,32 +35,31 @@ def test_latency_measurement_structure():
             assert metrics["total_ms"] >= (metrics["retrieval_ms"] + metrics["generation_ms"])
 
 def test_generation_context_limit():
-    """Verify that the context selection obeys the configured limit."""
-    with patch('app.rag.pipeline.HybridRetriever') as mock_retriever_class:
-        mock_retriever = MagicMock()
-        # Provide 10 results
-        mock_retriever.retrieve.return_value = [{"chunk_id": f"c{i}", "content": "some clinical text " * 10} for i in range(10)]
-        mock_retriever_class.return_value = mock_retriever
+    """Verify that the context selection obeys both the configured count limit and token budget."""
+    from app.rag.context_manager import bound_evidence
+    from app.config import settings
 
-        with patch('app.rag.pipeline.GeminiGenerator') as mock_gen_class:
-            mock_gen = MagicMock()
-            from app.schemas.generation import ClinicalAnswer
-            mock_gen.generate_answer.return_value = ClinicalAnswer(
-                answer="test", evidence_status="supported", cited_chunk_ids=["c0"], clinician_review_required=False
-            )
-            mock_gen_class.return_value = mock_gen
+    # Mock chunks: each approx 11 tokens (40 chars)
+    chunks = [{"chunk_id": f"c{i}", "content": "A" * 40} for i in range(10)]
 
-            pipeline = ClinicalRAGPipeline()
-            pipeline.ask("test query")
+    # Test Case 1: Limited by Count (TOP_K = 4, Tokens = 1000)
+    with patch('app.rag.context_manager.settings.GENERATION_TOP_K_CONTEXT', 4):
+        with patch('app.rag.context_manager.settings.GENERATION_EVIDENCE_MAX_TOKENS', 1000):
+            result = bound_evidence(chunks, max_tokens=1000)
+            assert len(result) == 4, f"Expected 4 chunks (bound by TOP_K), got {len(result)}"
 
-            # Check how many chunks were passed to generate_answer
-            args, kwargs = mock_gen.generate_answer.call_args
-            context_passed = args[1]
-            # It should be bound by either GENERATION_TOP_K_CONTEXT (obsolete)
-            # or the new bound_evidence token limit.
-            # Since we use bound_evidence now, it should not exceed the token budget.
-            # For a small token budget, it might be less than 10.
-            assert len(context_passed) <= 10
+    # Test Case 2: Limited by Tokens (TOP_K = 10, Tokens = 50)
+    with patch('app.rag.context_manager.settings.GENERATION_TOP_K_CONTEXT', 10):
+        with patch('app.rag.context_manager.settings.GENERATION_EVIDENCE_MAX_TOKENS', 50):
+            # 50 tokens / 11 tokens per chunk ~= 4.5 chunks. Should be 4.
+            result = bound_evidence(chunks, max_tokens=50)
+            assert len(result) == 4, f"Expected 4 chunks (bound by tokens), got {len(result)}"
+
+    # Test Case 3: No chunks should be truncated
+    result = bound_evidence(chunks, max_tokens=100)
+    for res_chunk in result:
+        assert res_chunk in chunks
+
 
 def test_model_config_propagation():
     """Verify that generator uses the correct default model for voice (flash-lite)."""

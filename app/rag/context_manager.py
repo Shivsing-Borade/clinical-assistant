@@ -61,14 +61,19 @@ def bound_context(messages: List[Dict[str, Any]],
 def bound_evidence(chunks: List[Dict[str, Any]],
                   max_tokens: int = settings.GENERATION_EVIDENCE_MAX_TOKENS) -> List[Dict[str, Any]]:
     """
-    Bounds retrieved evidence to a token budget.
+    Bounds retrieved evidence to a token budget and a maximum chunk count.
     - Keeps chunks whole.
     - Priority given to top-ranked chunks.
+    - Obey both GENERATION_TOP_K_CONTEXT and GENERATION_EVIDENCE_MAX_TOKENS.
     """
     bounded_chunks = []
     current_tokens = 0
+    max_chunks = settings.GENERATION_TOP_K_CONTEXT
 
     for chunk in chunks:
+        if len(bounded_chunks) >= max_chunks:
+            break
+
         chunk_tokens = estimate_tokens(chunk['content'])
         if current_tokens + chunk_tokens > max_tokens:
             break
