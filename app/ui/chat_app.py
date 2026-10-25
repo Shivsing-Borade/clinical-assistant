@@ -4,6 +4,7 @@ import json
 from typing import List, Dict, Any, Tuple, Optional
 from app.rag.pipeline import ClinicalAssistantOrchestrator, OrchestratedResponse
 from app.storage.conversation_store import ConversationStore
+from streamlit_mic_recorder import mic_recorder
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -96,6 +97,8 @@ if "current_thread_id" not in st.session_state:
     st.session_state.current_thread_id = None
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "transcription_buffer" not in st.session_state:
+    st.session_state.transcription_buffer = ""
 
 # --- Sidebar ---
 store = get_store()
@@ -161,7 +164,56 @@ for message in st.session_state.messages:
                 st.info(f"ℹ️ {message['caution']}")
 
 # Chat Input
-if prompt := st.chat_input("Enter clinical query..."):
+# --- Voice Input Section ---
+voice_col1, voice_col2 = st.columns([0.8, 0.2])
+with voice_col1:
+    # Changed format to "wav" as it's more likely to be compatible with the browser's
+    # audio capture and required for the transcription pipeline.
+    audio_data = mic_recorder(
+        start_prompt="🎙️ Record Query",
+        stop_prompt="🛑 Stop",
+        format="wav",
+        key="clinical_mic"
+    )
+
+if audio_data:
+    # Note: In a full Gemini Live implementation, we would stream these bytes.
+    # For this milestone, we use the recorder's output and a simplified transcription call.
+    if "last_audio" not in st.session_state or st.session_state.last_audio != audio_data['bytes']:
+        st.session_state.last_audio = audio_data['bytes']
+        with st.spinner("Transcribing..."):
+            # Simplified transcription for Milestone 1 integration
+            # Real Gemini Live would use the async stream in app/voice/transcriber.py
+            import base64
+            from google import genai
+            from app.config import settings
+
+            try:
+                client = genai.Client(api_key=settings.GEMINI_API_KEY)
+                # Using the transcription model to process the recorded audio
+                response = client.models.generate_content(
+                    model=settings.TRANSCRIPTION_MODEL,
+                    contents=["Transcribe this clinical audio accurately. Output only the transcription.",
+                              {"mime_type": "audio/wav", "data": audio_data['bytes']}]
+                )
+                st.session_state.transcription_buffer = response.text
+            except Exception as e:
+                st.error(f"Transcription failed: {e}")
+
+if st.session_state.transcription_buffer:
+    st.markdown("### 📝 Review Transcription")
+    edited_transcript = st.text_area("Edit if necessary:", value=st.session_state.transcription_buffer, key="transcript_edit")
+    if st.button("✅ Use Transcript"):
+        st.session_state.transcript_submitted = edited_transcript
+        st.session_state.transcription_buffer = ""
+
+# Resolve final prompt (either from chat_input or voice)
+prompt = st.chat_input("Enter clinical query...")
+if st.session_state.get("transcript_submitted"):
+    prompt = st.session_state.transcript_submitted
+    st.session_state.transcript_submitted = None
+
+if prompt:
     # Ensure we have a thread
     if st.session_state.current_thread_id is None:
         # Create new thread using first message as title
