@@ -64,6 +64,10 @@ class ClinicalRAGPipeline:
         gen_context = bound_evidence(results)
 
         retrieval_latency = (time.perf_counter() - start_retrieval) * 1000
+        logger.info(
+            "RAG retrieval: latency_ms=%.1f chunks_retrieved=%d chunks_used=%d",
+            retrieval_latency, len(results), len(gen_context),
+        )
 
         # 2. Short-circuit if no evidence
         if not results:
@@ -86,6 +90,7 @@ class ClinicalRAGPipeline:
             logger.error(f"Generation failed: {e}")
             raise
         generation_latency = (time.perf_counter() - start_gen) * 1000
+        logger.info("RAG generation: latency_ms=%.1f", generation_latency)
 
         # 4. Citation Validation
         actual_ids = {res['chunk_id'] for res in results}
@@ -98,6 +103,10 @@ class ClinicalRAGPipeline:
             answer_obj.caution = f"{existing_caution} {val_warning}".strip()
 
         latency_total = (time.perf_counter() - start_total) * 1000
+        logger.info(
+            "RAG pipeline total: retrieval_ms=%.1f generation_ms=%.1f total_ms=%.1f",
+            retrieval_latency, generation_latency, latency_total,
+        )
 
         metrics = {
             "retrieval_ms": retrieval_latency,
@@ -129,10 +138,11 @@ class ClinicalAssistantOrchestrator:
         # Bounded history for routing and generation
         bounded_history = bound_context(history) if history else []
 
-        # 1. Routing
+        # 1. Routing (intent classification + standalone-question rewrite for follow-ups)
         start_routing = time.perf_counter()
         routing_res = self.router.route_query(query, history=bounded_history)
         routing_latency = (time.perf_counter() - start_routing) * 1000
+        logger.info("Orchestrator routing: route=%s latency_ms=%.1f", routing_res.route, routing_latency)
 
         route = routing_res.route
 
@@ -155,6 +165,17 @@ class ClinicalAssistantOrchestrator:
                     "generation_ms": rag_metrics.get("generation_ms", 0.0),
                     "total_ms": total_latency
                 }
+
+                logger.info(
+                    "Orchestrator RAG complete: routing_ms=%.1f retrieval_ms=%.1f "
+                    "generation_ms=%.1f total_ms=%.1f retrieved=%d used=%d",
+                    routing_latency,
+                    rag_metrics.get("retrieval_ms", 0.0),
+                    rag_metrics.get("generation_ms", 0.0),
+                    total_latency,
+                    diagnostics.get("retrieved_chunks", 0),
+                    diagnostics.get("used_chunks", 0),
+                )
 
                 resp = OrchestratedResponse(
                     route=route,

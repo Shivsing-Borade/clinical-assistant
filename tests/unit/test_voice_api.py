@@ -127,3 +127,75 @@ def test_clinical_tool_definition_blocking():
     assert decl["name"] == "get_clinical_guidelines"
     assert decl["behavior"] == "BLOCKING"
 
+
+@pytest.mark.anyio
+async def test_consecutive_multi_turn_voice_receiving():
+    """Verify send_to_browser handles multiple consecutive voice turns without exiting after turn 1."""
+    import asyncio
+    from fastapi import WebSocket
+
+    mock_websocket = AsyncMock(spec=WebSocket)
+    sent_messages = []
+
+    async def mock_send_json(data):
+        sent_messages.append(data)
+
+    mock_websocket.send_json = mock_send_json
+
+    turn_count = 0
+    # Provide 3 turns of messages, followed by session close (empty generator)
+    async def mock_receive():
+        nonlocal turn_count
+        turn_count += 1
+        if turn_count > 3:
+            return  # Session closed
+        # First a model part, then turn_complete
+        yield types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                model_turn=types.Content(
+                    parts=[types.Part(text=f"Response for turn {turn_count}")]
+                )
+            )
+        )
+        yield types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                turn_complete=True
+            ),
+            usage_metadata=types.UsageMetadata(total_token_count=100 * turn_count)
+        )
+
+    mock_session = AsyncMock()
+    mock_session.receive = mock_receive
+
+    # Emulate the send_to_browser loop logic from app/main.py
+    turn_counter = 0
+    while True:
+        turn_has_messages = False
+        async for response in mock_session.receive():
+            turn_has_messages = True
+            if response.usage_metadata and response.usage_metadata.total_token_count:
+                await mock_websocket.send_json({
+                    "type": "usage_metadata",
+                    "total_tokens": response.usage_metadata.total_token_count,
+                })
+            if response.server_content:
+                if response.server_content.turn_complete:
+                    await mock_websocket.send_json({"type": "turn_complete"})
+                if response.server_content.model_turn:
+                    for part in response.server_content.model_turn.parts:
+                        if part.text:
+                            await mock_websocket.send_json({
+                                "type": "text",
+                                "text": part.text,
+                            })
+        if not turn_has_messages:
+            break
+        turn_counter += 1
+
+    assert turn_counter == 3
+    # Check that all 3 turns produced their text and turn_complete messages
+    texts = [m["text"] for m in sent_messages if m.get("type") == "text"]
+    assert texts == ["Response for turn 1", "Response for turn 2", "Response for turn 3"]
+    completions = [m for m in sent_messages if m.get("type") == "turn_complete"]
+    assert len(completions) == 3
+

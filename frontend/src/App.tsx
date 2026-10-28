@@ -205,6 +205,11 @@ const App: React.FC = () => {
   // Voice Mode Flag: Only play incoming audio aloud when user interacted via voice
   const isVoiceModeRef = useRef<boolean>(false);
 
+  // Per-turn flag: set when a clinical_answer has already been rendered for the current turn.
+  // Prevents the Gemini Live spoken-text summary from creating a second assistant message
+  // for text-mode queries (where the clinical card is already the complete answer).
+  const hasClinicalAnswerThisTurnRef = useRef<boolean>(false);
+
   // Concurrency & Cancellation Controls
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const currentRequestIdRef = useRef<number>(0);
@@ -286,6 +291,10 @@ const App: React.FC = () => {
 
           if (msg.type === 'user_transcription') {
             if (isRequestCancelledRef.current) return;
+            // Ignore transcription echoes from Gemini Live for text-mode queries.
+            // When the user types (not speaks), isVoiceModeRef is false and the user
+            // message is already displayed optimistically by handleSend().
+            if (!isVoiceModeRef.current) return;
             const transcriptText = msg.text?.trim();
             if (!transcriptText) return;
 
@@ -341,6 +350,10 @@ const App: React.FC = () => {
 
           } else if (msg.type === 'text') {
             if (isRequestCancelledRef.current) return;
+            // In text mode, after a clinical_answer has already been rendered for this
+            // turn, suppress the redundant Gemini Live spoken-text summary so there
+            // is exactly one assistant message per user query.
+            if (!isVoiceModeRef.current && hasClinicalAnswerThisTurnRef.current) return;
             setIsThinking(false);
 
             const durationSec = requestStartTimeRef.current
@@ -387,6 +400,10 @@ const App: React.FC = () => {
             if (isRequestCancelledRef.current) return;
             setIsThinking(false);
             const parsed = parseClinicalAnswer(msg.answer);
+
+            // Mark that a clinical answer card has been rendered for this turn.
+            // The 'text' handler will use this to avoid adding a second assistant message.
+            hasClinicalAnswerThisTurnRef.current = true;
 
             const durationSec = requestStartTimeRef.current
               ? ((Date.now() - requestStartTimeRef.current) / 1000).toFixed(1)
@@ -442,8 +459,15 @@ const App: React.FC = () => {
               });
             }
 
+          } else if (msg.type === 'interrupted') {
+            console.log('Turn interrupted by user speech');
+            stopAudioPlayback();
+            setIsThinking(false);
+            hasClinicalAnswerThisTurnRef.current = false;
+
           } else if (msg.type === 'turn_complete') {
             setIsThinking(false);
+            hasClinicalAnswerThisTurnRef.current = false;
 
           } else if (msg.type === 'error') {
             setIsThinking(false);
@@ -455,6 +479,8 @@ const App: React.FC = () => {
       };
 
       socket.onclose = () => {
+        stopRecording();
+        stopAudioPlayback();
         setIsConnected(false);
         setIsRecording(false);
         setIsThinking(false);
@@ -462,6 +488,8 @@ const App: React.FC = () => {
       };
 
       socket.onerror = (err) => {
+        stopRecording();
+        stopAudioPlayback();
         setIsThinking(false);
         setIsRecording(false);
         setError('WebSocket error occurred');
@@ -469,6 +497,8 @@ const App: React.FC = () => {
       };
 
     } catch (e) {
+      stopRecording();
+      stopAudioPlayback();
       setIsThinking(false);
       setIsRecording(false);
       setError('Failed to connect to server');
@@ -492,9 +522,16 @@ const App: React.FC = () => {
       return;
     }
 
+    if (!isConnected || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      setError('Not connected to assistant. Reconnecting...');
+      connect();
+      return;
+    }
+
     try {
       isVoiceModeRef.current = true;
       isRequestCancelledRef.current = false;
+      hasClinicalAnswerThisTurnRef.current = false;
       currentRequestIdRef.current++;
       activeRequestThreadIdRef.current = activeThreadIdRef.current;
 
@@ -678,6 +715,7 @@ const App: React.FC = () => {
 
     // Reset cancellation & assign request sequence
     isRequestCancelledRef.current = false;
+    hasClinicalAnswerThisTurnRef.current = false;
     currentRequestIdRef.current++;
     const targetId = activeThreadIdRef.current;
     activeRequestThreadIdRef.current = targetId;
@@ -739,13 +777,15 @@ const App: React.FC = () => {
   };
 
   const handleNewChat = () => {
-    if (isThinking) {
-      handleStopText();
-    }
+    isRequestCancelledRef.current = true;
+    currentRequestIdRef.current++;
     if (isRecording) {
       stopRecording();
     }
     stopAudioPlayback();
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'stop' }));
+    }
     isVoiceModeRef.current = false;
     const newThread = createNewThread();
     setThreads((prev) => [newThread, ...prev]);
@@ -758,13 +798,15 @@ const App: React.FC = () => {
 
   const handleSelectThread = (id: string) => {
     if (id === activeThreadId) return;
-    if (isThinking) {
-      handleStopText();
-    }
+    isRequestCancelledRef.current = true;
+    currentRequestIdRef.current++;
     if (isRecording) {
       stopRecording();
     }
     stopAudioPlayback();
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'stop' }));
+    }
     isVoiceModeRef.current = false;
     setActiveThreadId(id);
     activeRequestThreadIdRef.current = id;
@@ -775,11 +817,14 @@ const App: React.FC = () => {
   const handleDeleteThread = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (id === activeThreadId) {
-      if (isThinking) {
-        handleStopText();
-      }
+      isRequestCancelledRef.current = true;
+      currentRequestIdRef.current++;
       if (isRecording) {
         stopRecording();
+      }
+      stopAudioPlayback();
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: 'stop' }));
       }
     }
     stopAudioPlayback();

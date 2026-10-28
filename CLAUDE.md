@@ -51,6 +51,8 @@ Act as a senior Python/RAG engineer.
    - Response duration & real token usage metadata display (`time · sec · tokens`) attached below assistant messages, extracted from provider `UsageMetadata` without fabrication.
    - Race condition & audio buffer cancellation: instant Web Audio buffer termination on stop, request sequence tagging to discard late chunks across stopped queries or switched conversations, and automatic busy state recovery on network errors.
 2. **Backend:** FastAPI server with WebSocket support (`/ws/voice`) for bidirectional real-time audio and text streaming.
+   - Multi-turn persistent receive loop: wraps `session.receive()` in an outer generator loop so subsequent turns continue streaming without premature loop exit upon turn completion.
+   - Session lifecycle & graceful shutdown: coordinates `receive_from_browser` and `send_to_browser` via `asyncio.wait(FIRST_COMPLETED)`, automatically cancelling paired tasks on client disconnect or session closure to prevent keepalive ping timeouts (`1011`) and zombie audio streaming.
 3. **Voice Integration:** Gemini Live via `google-genai` SDK for real-time audio interaction (16kHz PCM in, 24kHz PCM out) with `input_audio_transcription` and `output_audio_transcription`.
 4. **Clinical Bridge:** Tool-calling integration (`get_clinical_guidelines` with `behavior: "BLOCKING"`) between Gemini Live and `ClinicalAssistantOrchestrator`, ensuring synthesized spoken answers are streamed back over the voice connection.
 5. **End-to-End Flow:** Voice/Text Input $\rightarrow$ Gemini Live $\rightarrow$ Clinical RAG Tool $\rightarrow$ In-stream Voice/Text Output with expandable citations and synchronized spoken audio.
