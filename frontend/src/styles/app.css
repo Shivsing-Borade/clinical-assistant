@@ -560,13 +560,45 @@ body {
   border-bottom-right-radius: 4px;
 }
 
+/* Voice Transcript & Speech Enhancements */
+.message-bubble.voice-mode {
+  padding: 1.05rem 1.35rem;
+}
+
+.message-bubble.voice-mode .voice-transcript-text {
+  font-size: 1.15rem;
+  line-height: 1.65;
+  letter-spacing: -0.01em;
+}
+
+.message-bubble.user.voice-mode {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+}
+
+.message-bubble.assistant.voice-mode {
+  border-left: 3px solid var(--accent-blue);
+  background-color: #ffffff;
+}
+
 .transcription-indicator {
+  margin-bottom: 0.5rem;
+}
+
+.transcription-indicator-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background-color: rgba(255, 255, 255, 0.22);
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
   font-size: 0.72rem;
-  font-weight: 600;
-  margin-bottom: 0.35rem;
-  opacity: 0.85;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
+}
+
+.transcription-mic-icon {
+  font-size: 0.85rem;
 }
 
 .message-bubble.assistant {
@@ -592,11 +624,29 @@ body {
   margin-bottom: 0.35rem;
 }
 
-.message-timestamp {
-  font-size: 0.7rem;
+/* Response Metadata: Timestamp, AI Response Time, Token Usage */
+.message-metadata {
+  display: flex;
+  align-items: center;
+  font-size: 0.72rem;
   color: var(--text-muted);
-  margin-top: 0.3rem;
+  margin-top: 0.35rem;
   padding: 0 0.5rem;
+  user-select: none;
+}
+
+.chat-message-row.user .message-metadata {
+  justify-content: flex-end;
+}
+
+.message-timestamp {
+  color: var(--text-muted);
+}
+
+.message-duration,
+.message-tokens {
+  color: #64748b;
+  font-weight: 500;
 }
 
 /* Integrated Clinical Metadata Card */
@@ -846,6 +896,40 @@ body {
   cursor: not-allowed;
 }
 
+/* Stop Button: Replaces Send Button during Active Response */
+.btn-stop {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: #ef4444;
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, transform 0.1s;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.35);
+}
+
+.btn-stop:hover {
+  background-color: #dc2626;
+  transform: scale(1.05);
+}
+
+.btn-stop:active {
+  transform: scale(0.95);
+}
+
+.stop-square {
+  width: 12px;
+  height: 12px;
+  background-color: white;
+  border-radius: 2px;
+  display: block;
+}
+
 .chat-disclaimer-footer {
   max-width: 820px;
   margin: 0.5rem auto 0 auto;
@@ -874,6 +958,10 @@ body {
   }
   .message-bubble-wrapper {
     max-width: 90%;
+  }
+  .message-bubble.voice-mode .voice-transcript-text {
+    font-size: 1.05rem;
+    line-height: 1.55;
   }
   .btn-voice-text {
     display: none;

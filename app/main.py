@@ -120,6 +120,9 @@ async def voice_endpoint(websocket: WebSocket):
                             logger.info("Received text message from browser (length: %d chars)", len(query_text))
                             await session.send_realtime_input(text=query_text)
 
+                        elif msg_type == "stop":
+                            logger.info("Received stop signal from browser; turn cancelled by user")
+
                         else:
                             logger.warning("Unknown message type received from browser: %s", msg_type)
 
@@ -132,8 +135,30 @@ async def voice_endpoint(websocket: WebSocket):
                 """Reads responses from Gemini and sends to browser."""
                 try:
                     async for response in session.receive():
+                        # Forward real token usage metadata from Gemini Live turn if available
+                        if response.usage_metadata:
+                            total_tokens = getattr(response.usage_metadata, "total_token_count", None)
+                            prompt_tokens = getattr(response.usage_metadata, "prompt_token_count", None)
+                            response_tokens = getattr(response.usage_metadata, "response_token_count", None)
+                            logger.info(
+                                "Gemini Live usage: total=%s prompt=%s response=%s",
+                                total_tokens,
+                                prompt_tokens,
+                                response_tokens,
+                            )
+                            if total_tokens is not None and total_tokens > 0:
+                                await websocket.send_json({
+                                    "type": "usage_metadata",
+                                    "total_tokens": total_tokens,
+                                    "prompt_tokens": prompt_tokens,
+                                    "response_tokens": response_tokens,
+                                })
+
                         # Handle user speech transcription and assistant outputs
                         if response.server_content:
+                            if response.server_content.turn_complete:
+                                await websocket.send_json({"type": "turn_complete"})
+
                             # Forward user speech transcription if available
                             if response.server_content.interim_input_transcription and response.server_content.interim_input_transcription.text:
                                 await websocket.send_json({

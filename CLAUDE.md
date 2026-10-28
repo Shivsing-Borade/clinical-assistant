@@ -46,6 +46,10 @@ Act as a senior Python/RAG engineer.
    - Selective voice response playback (assistant audio is spoken aloud when interacting via voice mode, and kept silent during text mode).
    - Welcome screen with clinical starter prompts when idle.
    - Fixed bottom dock featuring multi-line auto-resizing input, Enter-to-send (Shift+Enter for newline), send button, and preserved voice button.
+   - Mutual exclusion between text chat and voice mode (only one active interaction at a time; starting text replaces send button with an abortive Stop button and disables voice; starting voice disables text input and send button).
+   - Voice transcript readability: prominent badge indicator (`🎙️ Spoken Query`) and larger typography (`1.15rem` desktop / `1.05rem` mobile) for transcribed speech and spoken responses without altering standard text chat typography.
+   - Response duration & real token usage metadata display (`time · sec · tokens`) attached below assistant messages, extracted from provider `UsageMetadata` without fabrication.
+   - Race condition & audio buffer cancellation: instant Web Audio buffer termination on stop, request sequence tagging to discard late chunks across stopped queries or switched conversations, and automatic busy state recovery on network errors.
 2. **Backend:** FastAPI server with WebSocket support (`/ws/voice`) for bidirectional real-time audio and text streaming.
 3. **Voice Integration:** Gemini Live via `google-genai` SDK for real-time audio interaction (16kHz PCM in, 24kHz PCM out) with `input_audio_transcription` and `output_audio_transcription`.
 4. **Clinical Bridge:** Tool-calling integration (`get_clinical_guidelines` with `behavior: "BLOCKING"`) between Gemini Live and `ClinicalAssistantOrchestrator`, ensuring synthesized spoken answers are streamed back over the voice connection.

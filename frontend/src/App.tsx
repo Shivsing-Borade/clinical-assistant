@@ -17,6 +17,9 @@ interface ChatMessage {
   clinicalData?: ClinicalData;
   isTranscription?: boolean;
   isPartial?: boolean;
+  isVoiceInteraction?: boolean;
+  durationSec?: string;
+  tokenCount?: number;
 }
 
 interface ChatThread {
@@ -202,6 +205,13 @@ const App: React.FC = () => {
   // Voice Mode Flag: Only play incoming audio aloud when user interacted via voice
   const isVoiceModeRef = useRef<boolean>(false);
 
+  // Concurrency & Cancellation Controls
+  const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const currentRequestIdRef = useRef<number>(0);
+  const activeRequestThreadIdRef = useRef<string | null>(null);
+  const isRequestCancelledRef = useRef<boolean>(false);
+  const requestStartTimeRef = useRef<number>(0);
+
   // References
   const socketRef = useRef<WebSocket | null>(null);
   const recordingCtxRef = useRef<AudioContext | null>(null);
@@ -239,6 +249,17 @@ const App: React.FC = () => {
   };
 
   const stopAudioPlayback = () => {
+    // Immediately halt all currently active audio buffer sources
+    activeSourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+        source.disconnect();
+      } catch {
+        // Source might already have ended
+      }
+    });
+    activeSourcesRef.current.clear();
+
     nextPlayTimeRef.current = 0;
     if (playbackCtxRef.current && playbackCtxRef.current.state === 'running') {
       nextPlayTimeRef.current = playbackCtxRef.current.currentTime;
@@ -261,11 +282,14 @@ const App: React.FC = () => {
       socket.onmessage = async (event) => {
         try {
           const msg = JSON.parse(event.data);
-          const targetId = activeThreadIdRef.current;
+          const targetId = activeRequestThreadIdRef.current || activeThreadIdRef.current;
 
           if (msg.type === 'user_transcription') {
+            if (isRequestCancelledRef.current) return;
             const transcriptText = msg.text?.trim();
             if (!transcriptText) return;
+
+            isVoiceModeRef.current = true;
 
             setThreads((prevThreads) => {
               return prevThreads.map((thread) => {
@@ -280,6 +304,7 @@ const App: React.FC = () => {
                     ...lastMsg,
                     text: transcriptText,
                     isPartial: !msg.is_final,
+                    isVoiceInteraction: true,
                   };
                 } else {
                   // Append new user transcription message
@@ -290,6 +315,7 @@ const App: React.FC = () => {
                     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                     isTranscription: true,
                     isPartial: !msg.is_final,
+                    isVoiceInteraction: true,
                   });
                 }
 
@@ -309,11 +335,17 @@ const App: React.FC = () => {
             });
 
             if (msg.is_final) {
+              requestStartTimeRef.current = Date.now();
               setIsThinking(true);
             }
 
           } else if (msg.type === 'text') {
+            if (isRequestCancelledRef.current) return;
             setIsThinking(false);
+
+            const durationSec = requestStartTimeRef.current
+              ? ((Date.now() - requestStartTimeRef.current) / 1000).toFixed(1)
+              : undefined;
 
             setThreads((prevThreads) => {
               return prevThreads.map((thread) => {
@@ -326,6 +358,7 @@ const App: React.FC = () => {
                   msgs[msgs.length - 1] = {
                     ...lastMsg,
                     text: lastMsg.text + msg.text,
+                    durationSec: lastMsg.durationSec || durationSec,
                   };
                 } else {
                   msgs.push({
@@ -333,6 +366,8 @@ const App: React.FC = () => {
                     role: 'assistant',
                     text: msg.text,
                     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    isVoiceInteraction: isVoiceModeRef.current,
+                    durationSec,
                   });
                 }
 
@@ -345,12 +380,17 @@ const App: React.FC = () => {
             });
 
           } else if (msg.type === 'audio') {
-            // Only play audio chunk if user is actively in voice mode
+            // Only play audio chunk if voice mode is active and request not cancelled
             playAudioChunk(msg.data);
 
           } else if (msg.type === 'clinical_answer') {
+            if (isRequestCancelledRef.current) return;
             setIsThinking(false);
             const parsed = parseClinicalAnswer(msg.answer);
+
+            const durationSec = requestStartTimeRef.current
+              ? ((Date.now() - requestStartTimeRef.current) / 1000).toFixed(1)
+              : undefined;
 
             setThreads((prevThreads) => {
               return prevThreads.map((thread) => {
@@ -363,6 +403,8 @@ const App: React.FC = () => {
                   text: parsed.answer,
                   clinicalData: parsed,
                   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  isVoiceInteraction: isVoiceModeRef.current,
+                  durationSec,
                 });
 
                 return {
@@ -372,6 +414,36 @@ const App: React.FC = () => {
                 };
               });
             });
+
+          } else if (msg.type === 'usage_metadata') {
+            if (isRequestCancelledRef.current) return;
+            const totalTokens = msg.total_tokens;
+            if (typeof totalTokens === 'number' && totalTokens > 0) {
+              setThreads((prevThreads) => {
+                return prevThreads.map((thread) => {
+                  if (thread.id !== targetId) return thread;
+
+                  const msgs = [...thread.messages];
+                  for (let i = msgs.length - 1; i >= 0; i--) {
+                    if (msgs[i].role === 'assistant') {
+                      msgs[i] = {
+                        ...msgs[i],
+                        tokenCount: totalTokens,
+                      };
+                      break;
+                    }
+                  }
+
+                  return {
+                    ...thread,
+                    messages: msgs,
+                  };
+                });
+              });
+            }
+
+          } else if (msg.type === 'turn_complete') {
+            setIsThinking(false);
 
           } else if (msg.type === 'error') {
             setIsThinking(false);
@@ -385,15 +457,20 @@ const App: React.FC = () => {
       socket.onclose = () => {
         setIsConnected(false);
         setIsRecording(false);
+        setIsThinking(false);
         setStatus('Disconnected');
       };
 
       socket.onerror = (err) => {
+        setIsThinking(false);
+        setIsRecording(false);
         setError('WebSocket error occurred');
         console.error('WebSocket error:', err);
       };
 
     } catch (e) {
+      setIsThinking(false);
+      setIsRecording(false);
       setError('Failed to connect to server');
     }
   };
@@ -402,6 +479,7 @@ const App: React.FC = () => {
     socketRef.current?.close();
     stopRecording();
     stopAudioPlayback();
+    setIsThinking(false);
     if (playbackCtxRef.current && playbackCtxRef.current.state !== 'closed') {
       playbackCtxRef.current.close();
       playbackCtxRef.current = null;
@@ -409,8 +487,17 @@ const App: React.FC = () => {
   };
 
   const startRecording = async () => {
+    // Prevent voice recording if text query or other request is currently active
+    if (isThinking) {
+      return;
+    }
+
     try {
       isVoiceModeRef.current = true;
+      isRequestCancelledRef.current = false;
+      currentRequestIdRef.current++;
+      activeRequestThreadIdRef.current = activeThreadIdRef.current;
+
       // Warm up playback context on user gesture
       const pCtx = getPlaybackContext();
       if (pCtx.state === 'suspended') {
@@ -494,9 +581,32 @@ const App: React.FC = () => {
     }
   };
 
+  const handleStopVoice = () => {
+    isRequestCancelledRef.current = true;
+    currentRequestIdRef.current++;
+    stopRecording();
+    stopAudioPlayback();
+    setIsThinking(false);
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'stop' }));
+    }
+  };
+
+  const handleStopText = () => {
+    isRequestCancelledRef.current = true;
+    currentRequestIdRef.current++;
+    setIsThinking(false);
+    stopAudioPlayback();
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'stop' }));
+    }
+  };
+
   const playAudioChunk = async (base64Audio: string) => {
-    // Only play audio chunk aloud if the user interacted via voice mode
-    if (!isVoiceModeRef.current) {
+    // Only play audio chunk aloud if the user interacted via voice mode and request is active
+    if (!isVoiceModeRef.current || isRequestCancelledRef.current) {
       return;
     }
 
@@ -528,6 +638,11 @@ const App: React.FC = () => {
       source.buffer = buffer;
       source.connect(audioCtx.destination);
 
+      activeSourcesRef.current.add(source);
+      source.onended = () => {
+        activeSourcesRef.current.delete(source);
+      };
+
       // Smooth chunk scheduling to prevent overlapping clicks/garble
       const now = audioCtx.currentTime;
       if (nextPlayTimeRef.current < now) {
@@ -543,6 +658,11 @@ const App: React.FC = () => {
 
   // Chat Actions
   const handleSend = (textToSend?: string) => {
+    // Mutual Exclusion: block text query if voice mode or request is busy
+    if (isThinking || isRecording) {
+      return;
+    }
+
     const message = (textToSend !== undefined ? textToSend : textInput).trim();
     if (!message) return;
 
@@ -556,12 +676,18 @@ const App: React.FC = () => {
     isVoiceModeRef.current = false;
     stopAudioPlayback();
 
+    // Reset cancellation & assign request sequence
+    isRequestCancelledRef.current = false;
+    currentRequestIdRef.current++;
+    const targetId = activeThreadIdRef.current;
+    activeRequestThreadIdRef.current = targetId;
+    requestStartTimeRef.current = Date.now();
+
     socketRef.current.send(JSON.stringify({
       type: 'text',
       text: message,
     }));
 
-    const targetId = activeThreadIdRef.current;
     setThreads((prevThreads) => {
       return prevThreads.map((thread) => {
         if (thread.id !== targetId) return thread;
@@ -572,6 +698,7 @@ const App: React.FC = () => {
           role: 'user',
           text: message,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isVoiceInteraction: false,
         });
 
         let newTitle = thread.title;
@@ -599,7 +726,9 @@ const App: React.FC = () => {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      if (!isThinking && !isRecording && textInput.trim()) {
+        handleSend();
+      }
     }
   };
 
@@ -610,11 +739,18 @@ const App: React.FC = () => {
   };
 
   const handleNewChat = () => {
+    if (isThinking) {
+      handleStopText();
+    }
+    if (isRecording) {
+      stopRecording();
+    }
     stopAudioPlayback();
     isVoiceModeRef.current = false;
     const newThread = createNewThread();
     setThreads((prev) => [newThread, ...prev]);
     setActiveThreadId(newThread.id);
+    activeRequestThreadIdRef.current = newThread.id;
     setIsThinking(false);
     setError(null);
     setTextInput('');
@@ -622,25 +758,42 @@ const App: React.FC = () => {
 
   const handleSelectThread = (id: string) => {
     if (id === activeThreadId) return;
+    if (isThinking) {
+      handleStopText();
+    }
+    if (isRecording) {
+      stopRecording();
+    }
     stopAudioPlayback();
     isVoiceModeRef.current = false;
     setActiveThreadId(id);
+    activeRequestThreadIdRef.current = id;
     setIsThinking(false);
     setError(null);
   };
 
   const handleDeleteThread = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    if (id === activeThreadId) {
+      if (isThinking) {
+        handleStopText();
+      }
+      if (isRecording) {
+        stopRecording();
+      }
+    }
     stopAudioPlayback();
     setThreads((prev) => {
       const filtered = prev.filter((t) => t.id !== id);
       if (filtered.length === 0) {
         const fresh = createNewThread();
         setActiveThreadId(fresh.id);
+        activeRequestThreadIdRef.current = fresh.id;
         return [fresh];
       }
       if (id === activeThreadId) {
         setActiveThreadId(filtered[0].id);
+        activeRequestThreadIdRef.current = filtered[0].id;
       }
       return filtered;
     });
@@ -764,22 +917,25 @@ const App: React.FC = () => {
             /* Conversation Thread */
             <div className="chat-messages-thread">
               {messages.map((msg) => (
-                <div key={msg.id} className={`chat-message-row ${msg.role}`}>
+                <div key={msg.id} className={`chat-message-row ${msg.role} ${msg.isVoiceInteraction ? 'voice-mode' : ''}`}>
                   <div className="message-avatar">
                     {msg.role === 'user' ? '👤' : '⚕️'}
                   </div>
 
                   <div className="message-bubble-wrapper">
-                    <div className={`message-bubble ${msg.role}`}>
+                    <div className={`message-bubble ${msg.role} ${msg.isVoiceInteraction ? 'voice-mode' : ''}`}>
                       {/* Spoken Query Indicator */}
                       {msg.role === 'user' && msg.isTranscription && (
                         <div className="transcription-indicator">
-                          <span>🎙️ {msg.isPartial ? 'Speaking...' : 'Spoken Query'}</span>
+                          <span className="transcription-indicator-badge">
+                            <span className="transcription-mic-icon">🎙️</span>
+                            <span>{msg.isPartial ? 'Speaking...' : 'Spoken Query'}</span>
+                          </span>
                         </div>
                       )}
 
                       {/* Main Text Content */}
-                      <div className="message-text">
+                      <div className={`message-text ${msg.isVoiceInteraction ? 'voice-transcript-text' : ''}`}>
                         {renderFormattedText(msg.text)}
                       </div>
 
@@ -821,7 +977,16 @@ const App: React.FC = () => {
                       )}
                     </div>
 
-                    <span className="message-timestamp">{msg.timestamp}</span>
+                    {/* Metadata: Timestamp, AI Response Time, Token Usage */}
+                    <div className="message-metadata">
+                      <span className="message-timestamp">{msg.timestamp}</span>
+                      {msg.role === 'assistant' && msg.durationSec && (
+                        <span className="message-duration"> · {msg.durationSec} sec</span>
+                      )}
+                      {msg.role === 'assistant' && typeof msg.tokenCount === 'number' && msg.tokenCount > 0 && (
+                        <span className="message-tokens"> · {msg.tokenCount.toLocaleString()} tokens</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -852,22 +1017,36 @@ const App: React.FC = () => {
             <textarea
               ref={textareaRef}
               className="chat-textarea"
-              placeholder={isConnected ? "Ask a clinical question (Enter to send, Shift+Enter for newline)..." : "Connecting to assistant..."}
+              placeholder={
+                !isConnected
+                  ? "Connecting to assistant..."
+                  : isRecording
+                  ? "Listening... (Finish speaking or press Stop Voice)"
+                  : isThinking
+                  ? "Assistant is generating response..."
+                  : "Ask a clinical question (Enter to send, Shift+Enter for newline)..."
+              }
               value={textInput}
               onChange={handleTextareaInput}
               onKeyDown={handleKeyDown}
               rows={1}
-              disabled={!isConnected && status !== 'Connecting...'}
+              disabled={!isConnected || isRecording || isThinking}
             />
 
             <div className="input-action-buttons">
-              {/* Preserved Voice Button: Exact Existing Behavior & Classes */}
+              {/* Preserved Voice Button: Enhanced for Mutual Exclusion */}
               <button
                 type="button"
-                onClick={isRecording ? stopRecording : startRecording}
+                onClick={isRecording ? handleStopVoice : startRecording}
                 className={`btn-voice ${isRecording ? 'recording' : ''}`}
-                title={isRecording ? 'Stop Recording' : 'Start Voice Input'}
-                disabled={!isConnected}
+                title={
+                  isThinking
+                    ? 'Voice disabled while query is processing'
+                    : isRecording
+                    ? 'Stop Voice Input'
+                    : 'Start Voice Input'
+                }
+                disabled={!isConnected || isThinking}
               >
                 {isRecording ? (
                   <>
@@ -882,19 +1061,30 @@ const App: React.FC = () => {
                 )}
               </button>
 
-              {/* Send Button */}
-              <button
-                type="button"
-                onClick={() => handleSend()}
-                className="btn-send"
-                disabled={!textInput.trim() || !isConnected}
-                title="Send Message"
-              >
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="22" y1="2" x2="11" y2="13"></line>
-                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                </svg>
-              </button>
+              {/* Send Button or Stop Button */}
+              {isThinking ? (
+                <button
+                  type="button"
+                  onClick={handleStopText}
+                  className="btn-stop"
+                  title="Stop Response"
+                >
+                  <span className="stop-square"></span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleSend()}
+                  className="btn-send"
+                  disabled={!textInput.trim() || !isConnected || isRecording}
+                  title={isRecording ? "Voice interaction active" : "Send Message"}
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                  </svg>
+                </button>
+              )}
             </div>
           </div>
 
