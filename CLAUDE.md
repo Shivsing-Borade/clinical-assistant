@@ -38,11 +38,18 @@ Act as a senior Python/RAG engineer.
 
 ### Phase 3 — Voice Interface & Web UI (CURRENT)
 **Deliverables:**
-1. **Frontend:** Lightweight React + TypeScript + Vite UI.
-2. **Backend:** FastAPI server with WebSocket support for audio streaming.
-3. **Voice Integration:** Gemini Live via `google-genai` SDK for real-time audio interaction.
-4. **Clinical Bridge:** Tool-calling integration between Gemini Live and `ClinicalAssistantOrchestrator`.
-5. **End-to-End Flow:** Voice Input $\rightarrow$ Gemini Live $\rightarrow$ Clinical RAG Tool $\rightarrow$ Voice/Text Output with citations.
+1. **Frontend:** Lightweight React + TypeScript + Vite UI with a unified ChatGPT/Gemini-style conversational interface.
+   - Clean single-stream conversation layout (no separate tabs or panels).
+   - Collapsible ChatGPT-style sidebar with persistent chat history (`localStorage`), consultation thread switching, and meaningful title generation from the first query.
+   - In-chat integrated clinical guidance cards with expandable citations/sources and clinician review flags.
+   - Live speech transcription display (`user_transcription`) showing the user's spoken words directly in the chat thread.
+   - Selective voice response playback (assistant audio is spoken aloud when interacting via voice mode, and kept silent during text mode).
+   - Welcome screen with clinical starter prompts when idle.
+   - Fixed bottom dock featuring multi-line auto-resizing input, Enter-to-send (Shift+Enter for newline), send button, and preserved voice button.
+2. **Backend:** FastAPI server with WebSocket support (`/ws/voice`) for bidirectional real-time audio and text streaming.
+3. **Voice Integration:** Gemini Live via `google-genai` SDK for real-time audio interaction (16kHz PCM in, 24kHz PCM out) with `input_audio_transcription` and `output_audio_transcription`.
+4. **Clinical Bridge:** Tool-calling integration (`get_clinical_guidelines` with `behavior: "BLOCKING"`) between Gemini Live and `ClinicalAssistantOrchestrator`, ensuring synthesized spoken answers are streamed back over the voice connection.
+5. **End-to-End Flow:** Voice/Text Input $\rightarrow$ Gemini Live $\rightarrow$ Clinical RAG Tool $\rightarrow$ In-stream Voice/Text Output with expandable citations and synchronized spoken audio.
 
 ## 3. Architecture & Design Principles
 - **Source of Truth:** Original PDF. Store unchanged; maintain source manifest.

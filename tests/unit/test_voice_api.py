@@ -104,10 +104,26 @@ async def test_live_session_setup_and_audio_streaming():
     with patch("app.main.genai.Client", return_value=mock_client):
         # Verify connect config parameters
         from app.voice.voice_bridge import CLINICAL_TOOL_DEFINITION
+        assert CLINICAL_TOOL_DEFINITION["function_declarations"][0]["behavior"] == "BLOCKING"
+
         expected_config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
             tools=[CLINICAL_TOOL_DEFINITION],
             system_instruction="You are a Clinical Knowledge Assistant.",
         )
         assert expected_config.response_modalities == [types.Modality.AUDIO]
+        assert expected_config.input_audio_transcription is not None
+        assert expected_config.output_audio_transcription is not None
         assert len(expected_config.tools) == 1
+        assert expected_config.tools[0].function_declarations[0].behavior.value == "BLOCKING"
+
+
+def test_clinical_tool_definition_blocking():
+    """Verify CLINICAL_TOOL_DEFINITION explicitly specifies BLOCKING behavior for synthesized audio output."""
+    from app.voice.voice_bridge import CLINICAL_TOOL_DEFINITION
+    decl = CLINICAL_TOOL_DEFINITION["function_declarations"][0]
+    assert decl["name"] == "get_clinical_guidelines"
+    assert decl["behavior"] == "BLOCKING"
+

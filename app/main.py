@@ -73,10 +73,13 @@ async def voice_endpoint(websocket: WebSocket):
     try:
         connect_config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
             tools=[CLINICAL_TOOL_DEFINITION],
             system_instruction=(
                 "You are a Clinical Knowledge Assistant. You provide guidelines based on retrieved evidence. "
                 "Always use the get_clinical_guidelines tool for medical and clinical queries. "
+                "After receiving clinical guidelines from the tool, synthesize the key recommendations concisely and speak the answer aloud to the clinician. "
                 "Be concise, clear, and professional."
             ),
         )
@@ -129,24 +132,48 @@ async def voice_endpoint(websocket: WebSocket):
                 """Reads responses from Gemini and sends to browser."""
                 try:
                     async for response in session.receive():
-                        # Handle audio and text outputs
-                        if response.server_content and response.server_content.model_turn:
-                            parts = response.server_content.model_turn.parts
-                            for part in parts:
-                                if part.inline_data and part.inline_data.data:
-                                    # Output audio is 24kHz PCM from Gemini Live
-                                    b64_audio = serialize_audio_data(part.inline_data.data)
-                                    await websocket.send_json({
-                                        "type": "audio",
-                                        "data": b64_audio,
-                                        "sampleRate": 24000,
-                                    })
+                        # Handle user speech transcription and assistant outputs
+                        if response.server_content:
+                            # Forward user speech transcription if available
+                            if response.server_content.interim_input_transcription and response.server_content.interim_input_transcription.text:
+                                await websocket.send_json({
+                                    "type": "user_transcription",
+                                    "text": response.server_content.interim_input_transcription.text,
+                                    "is_final": False,
+                                })
 
-                                if part.text:
-                                    await websocket.send_json({
-                                        "type": "text",
-                                        "text": part.text,
-                                    })
+                            if response.server_content.input_transcription and response.server_content.input_transcription.text:
+                                await websocket.send_json({
+                                    "type": "user_transcription",
+                                    "text": response.server_content.input_transcription.text,
+                                    "is_final": True,
+                                })
+
+                            # Forward output transcript if available
+                            if response.server_content.output_transcription and response.server_content.output_transcription.text:
+                                await websocket.send_json({
+                                    "type": "text",
+                                    "text": response.server_content.output_transcription.text,
+                                })
+
+                            # Handle audio and text parts from model turn
+                            if response.server_content.model_turn:
+                                parts = response.server_content.model_turn.parts
+                                for part in parts:
+                                    if part.inline_data and part.inline_data.data:
+                                        # Output audio is 24kHz PCM from Gemini Live
+                                        b64_audio = serialize_audio_data(part.inline_data.data)
+                                        await websocket.send_json({
+                                            "type": "audio",
+                                            "data": b64_audio,
+                                            "sampleRate": 24000,
+                                        })
+
+                                    if part.text:
+                                        await websocket.send_json({
+                                            "type": "text",
+                                            "text": part.text,
+                                        })
 
                         # Handle Tool Calls
                         if response.tool_call and response.tool_call.function_calls:
@@ -157,8 +184,18 @@ async def voice_endpoint(websocket: WebSocket):
                                 logger.info("Executing function call: %s (id=%s)", call_name, call_id)
 
                                 if call_name == "get_clinical_guidelines":
+                                    clinical_question = args.get("question", "")
+
+                                    # Confirm user transcription from the tool call question if voice mode is active
+                                    if clinical_question:
+                                        await websocket.send_json({
+                                            "type": "user_transcription",
+                                            "text": clinical_question,
+                                            "is_final": True,
+                                        })
+
                                     result = await bridge.get_clinical_guidelines(
-                                        question=args.get("question", ""),
+                                        question=clinical_question,
                                         history=args.get("history"),
                                     )
 

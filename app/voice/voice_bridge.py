@@ -56,6 +56,7 @@ CLINICAL_TOOL_DEFINITION = {
         {
             "name": "get_clinical_guidelines",
             "description": "Retrieves evidenced-based clinical guidelines for Indian OPD settings. Use this whenever the user asks a medical or clinical question about guidelines, dosages, or treatment protocols.",
+            "behavior": "BLOCKING",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {

@@ -1,22 +1,231 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './styles/app.css';
 
+interface ClinicalData {
+  answer: string;
+  caution?: string;
+  sources?: string[];
+  clinicianReviewRequired?: boolean;
+  rawText: string;
+}
+
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  text: string;
+  timestamp: string;
+  clinicalData?: ClinicalData;
+  isTranscription?: boolean;
+  isPartial?: boolean;
+}
+
+interface ChatThread {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessage[];
+}
+
+const STORAGE_THREADS_KEY = 'clinical_assistant_threads_v1';
+const STORAGE_ACTIVE_KEY = 'clinical_assistant_active_thread_id_v1';
+
+function createNewThread(): ChatThread {
+  return {
+    id: 'thread_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+    title: 'New Consultation',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    messages: [],
+  };
+}
+
+function loadInitialThreads(): { threads: ChatThread[]; activeId: string } {
+  try {
+    const raw = localStorage.getItem(STORAGE_THREADS_KEY);
+    const storedActive = localStorage.getItem(STORAGE_ACTIVE_KEY);
+    if (raw) {
+      const parsed: ChatThread[] = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const activeExists = parsed.some((t) => t.id === storedActive);
+        return {
+          threads: parsed,
+          activeId: activeExists && storedActive ? storedActive : parsed[0].id,
+        };
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load chat history from localStorage', err);
+  }
+
+  const initial = createNewThread();
+  return {
+    threads: [initial],
+    activeId: initial.id,
+  };
+}
+
+function parseClinicalAnswer(raw: string): ClinicalData {
+  let answer = '';
+  let caution: string | undefined;
+  let sources: string[] | undefined;
+  let clinicianReviewRequired = false;
+
+  const lines = raw.split('\n');
+  const answerLines: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('Answer:')) {
+      answerLines.push(trimmed.replace(/^Answer:\s*/, ''));
+    } else if (trimmed.startsWith('Caution:')) {
+      caution = trimmed.replace(/^Caution:\s*/, '');
+    } else if (trimmed.startsWith('Sources:')) {
+      const srcText = trimmed.replace(/^Sources:\s*/, '');
+      sources = srcText.split(',').map((s) => s.trim()).filter(Boolean);
+    } else if (trimmed.toLowerCase().includes('clinician review')) {
+      clinicianReviewRequired = true;
+    } else if (trimmed) {
+      answerLines.push(trimmed);
+    }
+  }
+
+  answer = answerLines.join('\n').trim();
+  if (!answer && raw) {
+    answer = raw;
+  }
+
+  return {
+    answer,
+    caution,
+    sources,
+    clinicianReviewRequired,
+    rawText: raw,
+  };
+}
+
+function formatInline(str: string): React.ReactNode {
+  const parts = str.split(/(\*\*[^*]+\*\*|__[^_]+__)/g);
+  return parts.map((part, idx) => {
+    if ((part.startsWith('**') && part.endsWith('**')) || (part.startsWith('__') && part.endsWith('__'))) {
+      return <strong key={idx}>{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+}
+
+function renderFormattedText(text: string): React.ReactNode {
+  if (!text) return null;
+  const paragraphs = text.split(/\n\n+/);
+
+  return (
+    <>
+      {paragraphs.map((para, pIdx) => {
+        const lines = para.split('\n');
+        const isBulletList = lines.every((l) => /^\s*([*•-]\s+|\d+\.\s+)/.test(l.trim()) || l.trim() === '');
+        if (isBulletList && lines.some((l) => l.trim())) {
+          return (
+            <ul key={pIdx} className="message-list">
+              {lines.filter((l) => l.trim()).map((l, lIdx) => {
+                const cleanItem = l.trim().replace(/^([*•-]\s+|\d+\.\s+)/, '');
+                return <li key={lIdx}>{formatInline(cleanItem)}</li>;
+              })}
+            </ul>
+          );
+        }
+
+        return (
+          <p key={pIdx} className="message-paragraph">
+            {lines.map((l, lIdx) => (
+              <React.Fragment key={lIdx}>
+                {formatInline(l)}
+                {lIdx < lines.length - 1 && <br />}
+              </React.Fragment>
+            ))}
+          </p>
+        );
+      })}
+    </>
+  );
+}
+
+const STARTER_PROMPTS = [
+  "What are the risk classes of IVD devices in India?",
+  "What are the high-risk factors for severe dengue in children and elderly?",
+  "When is platelet transfusion considered in dengue patients?",
+  "How is the Minimum Inhibitory Concentration (MIC) defined in antimicrobial testing?",
+];
+
 const App: React.FC = () => {
+  // Chat History / Thread State
+  const initialData = useRef(loadInitialThreads()).current;
+  const [threads, setThreads] = useState<ChatThread[]>(initialData.threads);
+  const [activeThreadId, setActiveThreadId] = useState<string>(initialData.activeId);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+
+  // Active Thread Reference for Async Callbacks
+  const activeThreadIdRef = useRef<string>(activeThreadId);
+  useEffect(() => {
+    activeThreadIdRef.current = activeThreadId;
+  }, [activeThreadId]);
+
+  // Persist Threads to LocalStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_THREADS_KEY, JSON.stringify(threads));
+    } catch (err) {
+      console.error('Failed to save threads to localStorage', err);
+    }
+  }, [threads]);
+
+  // Persist Active Thread ID to LocalStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_ACTIVE_KEY, activeThreadId);
+    } catch (err) {
+      console.error('Failed to save activeThreadId to localStorage', err);
+    }
+  }, [activeThreadId]);
+
+  // Active Messages
+  const activeThread = threads.find((t) => t.id === activeThreadId) || threads[0] || createNewThread();
+  const messages = activeThread.messages;
+
+  // Connection & UI State
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [transcript, setTranscript] = useState<string[]>([]);
-  const [clinicalAnswer, setClinicalAnswer] = useState<string | null>(null);
+  const [isThinking, setIsThinking] = useState(false);
   const [status, setStatus] = useState('Disconnected');
   const [error, setError] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
 
+  // Voice Mode Flag: Only play incoming audio aloud when user interacted via voice
+  const isVoiceModeRef = useRef<boolean>(false);
+
+  // References
   const socketRef = useRef<WebSocket | null>(null);
   const recordingCtxRef = useRef<AudioContext | null>(null);
   const playbackCtxRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // Auto-scroll to bottom of conversation
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isThinking]);
+
+  // Connect on initial load
+  useEffect(() => {
+    connect();
+    return () => {
+      socketRef.current?.close();
+    };
+  }, []);
+
+  // --- Voice Feature: Preserved Implementation ---
   const getPlaybackContext = (): AudioContext => {
     if (!playbackCtxRef.current || playbackCtxRef.current.state === 'closed') {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -27,6 +236,13 @@ const App: React.FC = () => {
       playbackCtxRef.current.resume();
     }
     return playbackCtxRef.current;
+  };
+
+  const stopAudioPlayback = () => {
+    nextPlayTimeRef.current = 0;
+    if (playbackCtxRef.current && playbackCtxRef.current.state === 'running') {
+      nextPlayTimeRef.current = playbackCtxRef.current.currentTime;
+    }
   };
 
   const connect = async () => {
@@ -45,14 +261,120 @@ const App: React.FC = () => {
       socket.onmessage = async (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.type === 'text') {
-            setTranscript((prev) => [...prev, `AI: ${msg.text}`]);
+          const targetId = activeThreadIdRef.current;
+
+          if (msg.type === 'user_transcription') {
+            const transcriptText = msg.text?.trim();
+            if (!transcriptText) return;
+
+            setThreads((prevThreads) => {
+              return prevThreads.map((thread) => {
+                if (thread.id !== targetId) return thread;
+
+                const msgs = [...thread.messages];
+                const lastMsg = msgs[msgs.length - 1];
+
+                if (lastMsg && lastMsg.role === 'user' && lastMsg.isTranscription) {
+                  // Update in-progress transcription message in place
+                  msgs[msgs.length - 1] = {
+                    ...lastMsg,
+                    text: transcriptText,
+                    isPartial: !msg.is_final,
+                  };
+                } else {
+                  // Append new user transcription message
+                  msgs.push({
+                    id: 'msg_user_' + Date.now(),
+                    role: 'user',
+                    text: transcriptText,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    isTranscription: true,
+                    isPartial: !msg.is_final,
+                  });
+                }
+
+                // Generate title from first user query
+                let newTitle = thread.title;
+                if ((thread.title === 'New Consultation' || thread.title === 'New Chat') && msg.is_final) {
+                  newTitle = transcriptText.length > 36 ? transcriptText.slice(0, 36) + '...' : transcriptText;
+                }
+
+                return {
+                  ...thread,
+                  title: newTitle,
+                  updatedAt: new Date().toISOString(),
+                  messages: msgs,
+                };
+              });
+            });
+
+            if (msg.is_final) {
+              setIsThinking(true);
+            }
+
+          } else if (msg.type === 'text') {
+            setIsThinking(false);
+
+            setThreads((prevThreads) => {
+              return prevThreads.map((thread) => {
+                if (thread.id !== targetId) return thread;
+
+                const msgs = [...thread.messages];
+                const lastMsg = msgs[msgs.length - 1];
+
+                if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.clinicalData) {
+                  msgs[msgs.length - 1] = {
+                    ...lastMsg,
+                    text: lastMsg.text + msg.text,
+                  };
+                } else {
+                  msgs.push({
+                    id: 'msg_asst_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+                    role: 'assistant',
+                    text: msg.text,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  });
+                }
+
+                return {
+                  ...thread,
+                  updatedAt: new Date().toISOString(),
+                  messages: msgs,
+                };
+              });
+            });
+
           } else if (msg.type === 'audio') {
+            // Only play audio chunk if user is actively in voice mode
             playAudioChunk(msg.data);
+
           } else if (msg.type === 'clinical_answer') {
-            setClinicalAnswer(msg.answer);
-            setTranscript((prev) => [...prev, 'System: Clinical guidelines retrieved and verified.']);
+            setIsThinking(false);
+            const parsed = parseClinicalAnswer(msg.answer);
+
+            setThreads((prevThreads) => {
+              return prevThreads.map((thread) => {
+                if (thread.id !== targetId) return thread;
+
+                const msgs = [...thread.messages];
+                msgs.push({
+                  id: 'msg_asst_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+                  role: 'assistant',
+                  text: parsed.answer,
+                  clinicalData: parsed,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                });
+
+                return {
+                  ...thread,
+                  updatedAt: new Date().toISOString(),
+                  messages: msgs,
+                };
+              });
+            });
+
           } else if (msg.type === 'error') {
+            setIsThinking(false);
             setError(msg.message);
           }
         } catch (e) {
@@ -79,6 +401,7 @@ const App: React.FC = () => {
   const disconnect = () => {
     socketRef.current?.close();
     stopRecording();
+    stopAudioPlayback();
     if (playbackCtxRef.current && playbackCtxRef.current.state !== 'closed') {
       playbackCtxRef.current.close();
       playbackCtxRef.current = null;
@@ -87,8 +410,12 @@ const App: React.FC = () => {
 
   const startRecording = async () => {
     try {
+      isVoiceModeRef.current = true;
       // Warm up playback context on user gesture
-      getPlaybackContext();
+      const pCtx = getPlaybackContext();
+      if (pCtx.state === 'suspended') {
+        await pCtx.resume();
+      }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -167,9 +494,18 @@ const App: React.FC = () => {
     }
   };
 
-  const playAudioChunk = (base64Audio: string) => {
+  const playAudioChunk = async (base64Audio: string) => {
+    // Only play audio chunk aloud if the user interacted via voice mode
+    if (!isVoiceModeRef.current) {
+      return;
+    }
+
     try {
       const audioCtx = getPlaybackContext();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+
       const binaryString = atob(base64Audio);
       const len = binaryString.length;
       const bytes = new Uint8Array(len);
@@ -203,93 +539,372 @@ const App: React.FC = () => {
       console.error('Error decoding/playing audio chunk:', err);
     }
   };
+  // --- End of Voice Feature ---
 
-  const sendTextMessage = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!textInput.trim() || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+  // Chat Actions
+  const handleSend = (textToSend?: string) => {
+    const message = (textToSend !== undefined ? textToSend : textInput).trim();
+    if (!message) return;
+
+    if (!isConnected || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      setError('Not connected to assistant. Reconnecting...');
+      connect();
       return;
     }
-    const message = textInput.trim();
+
+    // Explicitly in text mode: do not play audio aloud unexpectedly
+    isVoiceModeRef.current = false;
+    stopAudioPlayback();
+
     socketRef.current.send(JSON.stringify({
       type: 'text',
       text: message,
     }));
-    setTranscript((prev) => [...prev, `User: ${message}`]);
+
+    const targetId = activeThreadIdRef.current;
+    setThreads((prevThreads) => {
+      return prevThreads.map((thread) => {
+        if (thread.id !== targetId) return thread;
+
+        const msgs = [...thread.messages];
+        msgs.push({
+          id: 'msg_user_' + Date.now(),
+          role: 'user',
+          text: message,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        });
+
+        let newTitle = thread.title;
+        if (thread.title === 'New Consultation' || thread.title === 'New Chat') {
+          newTitle = message.length > 36 ? message.slice(0, 36) + '...' : message;
+        }
+
+        return {
+          ...thread,
+          title: newTitle,
+          updatedAt: new Date().toISOString(),
+          messages: msgs,
+        };
+      });
+    });
+
     setTextInput('');
+    setIsThinking(true);
+
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleTextareaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setTextInput(e.target.value);
+    e.target.style.height = 'auto';
+    e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px';
+  };
+
+  const handleNewChat = () => {
+    stopAudioPlayback();
+    isVoiceModeRef.current = false;
+    const newThread = createNewThread();
+    setThreads((prev) => [newThread, ...prev]);
+    setActiveThreadId(newThread.id);
+    setIsThinking(false);
+    setError(null);
+    setTextInput('');
+  };
+
+  const handleSelectThread = (id: string) => {
+    if (id === activeThreadId) return;
+    stopAudioPlayback();
+    isVoiceModeRef.current = false;
+    setActiveThreadId(id);
+    setIsThinking(false);
+    setError(null);
+  };
+
+  const handleDeleteThread = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    stopAudioPlayback();
+    setThreads((prev) => {
+      const filtered = prev.filter((t) => t.id !== id);
+      if (filtered.length === 0) {
+        const fresh = createNewThread();
+        setActiveThreadId(fresh.id);
+        return [fresh];
+      }
+      if (id === activeThreadId) {
+        setActiveThreadId(filtered[0].id);
+      }
+      return filtered;
+    });
   };
 
   const normalizedStatusClass = status.toLowerCase().replace(/[^a-z]/g, '');
 
   return (
-    <div className="app-container">
-      <header>
-        <h1>Clinical Knowledge Assistant</h1>
-        <div className={`status-badge ${normalizedStatusClass}`}>
-          {status}
+    <div className="chat-app-root">
+      {/* ChatGPT-Style Collapsible Sidebar */}
+      <aside className={`chat-sidebar ${isSidebarOpen ? 'open' : 'closed'}`}>
+        <div className="sidebar-header">
+          <button onClick={handleNewChat} className="btn-new-chat">
+            <span className="btn-new-chat-icon">➕</span>
+            <span className="btn-new-chat-label">New Consultation</span>
+          </button>
         </div>
-      </header>
 
-      <main>
-        <div className="control-panel">
-          {!isConnected ? (
-            <button onClick={connect} className="btn-primary">Connect to Assistant</button>
-          ) : (
-            <>
-              <div className="voice-controls">
+        <div className="sidebar-history-container">
+          <div className="sidebar-section-title">Previous Consultations</div>
+          <div className="sidebar-threads-list">
+            {threads.map((thread) => (
+              <div
+                key={thread.id}
+                className={`thread-item ${thread.id === activeThreadId ? 'active' : ''}`}
+                onClick={() => handleSelectThread(thread.id)}
+                title={thread.title}
+              >
+                <span className="thread-item-icon">💬</span>
+                <span className="thread-item-title">{thread.title}</span>
                 <button
-                  onClick={isRecording ? stopRecording : startRecording}
-                  className={`btn-voice ${isRecording ? 'recording' : ''}`}
+                  className="thread-item-delete"
+                  onClick={(e) => handleDeleteThread(e, thread.id)}
+                  title="Delete Conversation"
                 >
-                  {isRecording ? 'Stop Listening' : 'Start Speaking'}
+                  ✕
                 </button>
-                <button onClick={disconnect} className="btn-secondary">Disconnect</button>
               </div>
-
-              <form onSubmit={sendTextMessage} className="text-input-panel">
-                <input
-                  type="text"
-                  placeholder="Or type a greeting or clinical question..."
-                  value={textInput}
-                  onChange={(e) => setTextInput(e.target.value)}
-                />
-                <button type="submit">Send</button>
-              </form>
-            </>
-          )}
+            ))}
+          </div>
         </div>
 
-        {error && <div className="error-banner">{error}</div>}
+        <div className="sidebar-footer">
+          <div className="sidebar-footer-text">⚕️ Indian OPD Guidelines</div>
+          <div className="sidebar-footer-sub">Persistent Reference Storage</div>
+        </div>
+      </aside>
 
-        <div className="chat-layout">
-          <div className="transcript-area">
-            <h3>Conversation</h3>
-            <div className="transcript-list">
-              {transcript.length === 0 ? (
-                <div className="placeholder">No messages yet. Connect and speak or type to start.</div>
-              ) : (
-                transcript.map((line, i) => (
-                  <div key={i} className="transcript-line">{line}</div>
-                ))
-              )}
+      {/* Main Chat Workspace */}
+      <div className="chat-main-wrapper">
+        {/* Top Navigation Bar */}
+        <header className="chat-topbar">
+          <div className="topbar-left">
+            <button
+              onClick={() => setIsSidebarOpen((prev) => !prev)}
+              className="btn-sidebar-toggle"
+              title={isSidebarOpen ? "Collapse Sidebar" : "Expand Sidebar"}
+            >
+              ☰
+            </button>
+            <div className="topbar-brand">
+              <span className="brand-icon">⚕️</span>
+              <div>
+                <h1 className="brand-title">{activeThread.title}</h1>
+                <span className="brand-subtitle">Indian OPD Guideline Reference</span>
+              </div>
             </div>
           </div>
 
-          <div className="clinical-answer-area">
-            <h3>Clinical Guidance</h3>
-            {clinicalAnswer ? (
-              <div className="answer-card">
-                <div className="answer-text">{clinicalAnswer}</div>
-                <div className="review-flag">Clinician Review Required</div>
-              </div>
+          <div className="topbar-actions">
+            <div className={`status-pill ${normalizedStatusClass}`}>
+              <span className="status-dot"></span>
+              {status}
+            </div>
+
+            {!isConnected ? (
+              <button onClick={connect} className="btn-topbar-action">Connect</button>
             ) : (
-              <div className="placeholder">No clinical guidelines retrieved yet.</div>
+              <button onClick={disconnect} className="btn-topbar-subtle">Disconnect</button>
             )}
           </div>
-        </div>
-      </main>
+        </header>
+
+        {/* Main Conversation Scroll Stream */}
+        <main className="chat-scroll-container">
+          {error && (
+            <div className="chat-error-banner">
+              <span>⚠️ {error}</span>
+              <button onClick={() => setError(null)} className="error-close-btn">✕</button>
+            </div>
+          )}
+
+          {messages.length === 0 ? (
+            /* Welcome Screen when no conversation started */
+            <div className="chat-welcome-container">
+              <div className="welcome-hero-icon">⚕️</div>
+              <h2 className="welcome-title">How can I assist your clinical practice?</h2>
+              <p className="welcome-description">
+                Ask medical reference questions grounded in Indian Outpatient Department (OPD) clinical guidelines.
+                Speak into the microphone or type below.
+              </p>
+
+              <div className="starter-prompts-grid">
+                {STARTER_PROMPTS.map((prompt, idx) => (
+                  <button
+                    key={idx}
+                    className="starter-prompt-card"
+                    onClick={() => handleSend(prompt)}
+                  >
+                    <span className="starter-prompt-text">{prompt}</span>
+                    <span className="starter-prompt-arrow">→</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="welcome-disclaimer-pill">
+                For clinician reference only • Grounded in reviewed guidelines • Not an autonomous diagnostic system
+              </div>
+            </div>
+          ) : (
+            /* Conversation Thread */
+            <div className="chat-messages-thread">
+              {messages.map((msg) => (
+                <div key={msg.id} className={`chat-message-row ${msg.role}`}>
+                  <div className="message-avatar">
+                    {msg.role === 'user' ? '👤' : '⚕️'}
+                  </div>
+
+                  <div className="message-bubble-wrapper">
+                    <div className={`message-bubble ${msg.role}`}>
+                      {/* Spoken Query Indicator */}
+                      {msg.role === 'user' && msg.isTranscription && (
+                        <div className="transcription-indicator">
+                          <span>🎙️ {msg.isPartial ? 'Speaking...' : 'Spoken Query'}</span>
+                        </div>
+                      )}
+
+                      {/* Main Text Content */}
+                      <div className="message-text">
+                        {renderFormattedText(msg.text)}
+                      </div>
+
+                      {/* Integrated Clinical Guidance Metadata (Citations, Caution, Review Required) */}
+                      {msg.clinicalData && (
+                        <div className="clinical-metadata-card">
+                          {msg.clinicalData.clinicianReviewRequired && (
+                            <div className="clinical-review-pill">
+                              <span className="pill-icon">⚠️</span>
+                              <span>Clinician Review Required</span>
+                            </div>
+                          )}
+
+                          {msg.clinicalData.caution && (
+                            <div className="clinical-caution-box">
+                              <span className="caution-icon">ℹ️</span>
+                              <span className="caution-text">{msg.clinicalData.caution}</span>
+                            </div>
+                          )}
+
+                          {msg.clinicalData.sources && msg.clinicalData.sources.length > 0 && (
+                            <details className="clinical-sources-details">
+                              <summary className="clinical-sources-summary">
+                                <span className="summary-title">
+                                  📚 {msg.clinicalData.sources.length} Cited Guideline Sources
+                                </span>
+                                <span className="summary-toggle">View Details</span>
+                              </summary>
+                              <div className="sources-tags-container">
+                                {msg.clinicalData.sources.map((src, sIdx) => (
+                                  <span key={sIdx} className="source-citation-badge">
+                                    {src}
+                                  </span>
+                                ))}
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <span className="message-timestamp">{msg.timestamp}</span>
+                  </div>
+                </div>
+              ))}
+
+              {/* Thinking / Searching Indicator */}
+              {isThinking && (
+                <div className="chat-message-row assistant thinking">
+                  <div className="message-avatar">⚕️</div>
+                  <div className="thinking-bubble">
+                    <div className="thinking-dots">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </div>
+                    <span className="thinking-label">Retrieving guideline evidence & reasoning...</span>
+                  </div>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </main>
+
+        {/* Fixed Bottom Input Area */}
+        <footer className="chat-bottom-dock">
+          <div className="chat-input-bar">
+            <textarea
+              ref={textareaRef}
+              className="chat-textarea"
+              placeholder={isConnected ? "Ask a clinical question (Enter to send, Shift+Enter for newline)..." : "Connecting to assistant..."}
+              value={textInput}
+              onChange={handleTextareaInput}
+              onKeyDown={handleKeyDown}
+              rows={1}
+              disabled={!isConnected && status !== 'Connecting...'}
+            />
+
+            <div className="input-action-buttons">
+              {/* Preserved Voice Button: Exact Existing Behavior & Classes */}
+              <button
+                type="button"
+                onClick={isRecording ? stopRecording : startRecording}
+                className={`btn-voice ${isRecording ? 'recording' : ''}`}
+                title={isRecording ? 'Stop Recording' : 'Start Voice Input'}
+                disabled={!isConnected}
+              >
+                {isRecording ? (
+                  <>
+                    <span className="recording-dot"></span>
+                    <span>Stop</span>
+                  </>
+                ) : (
+                  <>
+                    <span>🎙️</span>
+                    <span className="btn-voice-text">Voice</span>
+                  </>
+                )}
+              </button>
+
+              {/* Send Button */}
+              <button
+                type="button"
+                onClick={() => handleSend()}
+                className="btn-send"
+                disabled={!textInput.trim() || !isConnected}
+                title="Send Message"
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div className="chat-disclaimer-footer">
+            Outputs are grounded in reviewed Indian OPD guidelines for clinician reference. Always exercise professional clinical judgment.
+          </div>
+        </footer>
+      </div>
     </div>
   );
 };
 
 export default App;
-
